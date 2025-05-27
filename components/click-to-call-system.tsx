@@ -57,6 +57,16 @@ export default function ClickToCallSystem() {
   const connectionStatusRef = useRef<ConnectionStatus>("disconnected")
   const qualificationsRef = useRef<Qualification[]>([])
 
+  const hubspotSdk = useRef<CallingExtensionSdk | null>(null) // Mudei aqui
+
+useEffect(() => {
+  const sdk = new CallingExtensionSdk()
+  sdk.init()
+  hubspotSdk.current = sdk
+  console.log("✅ HubSpot SDK initialized")
+}, [])
+// Até aqui
+
   useEffect(() => {
     tokenRef.current = token
   }, [token])
@@ -279,24 +289,35 @@ export default function ClickToCallSystem() {
           break
 
         case "call-was-connected":
-          const callData: CallData = {
-            id: data?.call?.id || "",
-            phone: data?.call?.phone || phoneNumber,
-            telephony_id: data?.call?.telephony_id || "",
-          }
-          setActiveCall(callData)
-          setAgentStatus("in_call")
+        const callData: CallData = {
+          id: data?.call?.id || "",
+          phone: data?.call?.phone || phoneNumber,
+          telephony_id: data?.call?.telephony_id || "",
+        }
 
-          // Reset call completion states for new call
-          setIsCallQualified(false)
-          setCallFinished(false)
-          setSelectedQualification(null)
+        setActiveCall(callData)
+        setAgentStatus("in_call")
 
-          // Store qualifications for when call is answered
-          const quals = data?.campaign?.dialer?.qualification_list?.qualifications || []
-          qualificationsRef.current = quals.map((q: any) => ({ id: q.id, name: q.name }))
-          updateStatus(`Ligação conectada: ${callData.phone}`, "success")
-          break
+        if (hubspotSdk.current && callData.phone) {
+          hubspotSdk.current.notifyCallStarted({
+            phoneNumber: callData.phone,
+            externalCallId: callData.id,
+            status: "IN_PROGRESS",
+          })
+        }
+
+        // Reset call completion states
+        setIsCallQualified(false)
+        setCallFinished(false)
+        setSelectedQualification(null)
+
+        // Store qualifications
+        const quals = data?.campaign?.dialer?.qualification_list?.qualifications || []
+        qualificationsRef.current = quals.map((q: any) => ({ id: q.id, name: q.name }))
+
+        updateStatus(`Ligação conectada: ${callData.phone}`, "success")
+        break
+
 
         case "manual-call-was-answered":
           setAgentStatus("call_answered")
@@ -323,6 +344,14 @@ export default function ClickToCallSystem() {
           break
 
         case "call-was-finished":
+          if (hubspotSdk.current && activeCall?.id) {
+            hubspotSdk.current.notifyCallEnded({
+              externalCallId: activeCall.id,
+              status: isCallQualified ? "COMPLETED" : "FAILED",
+              durationSeconds: 0, // ou calcule o tempo real, se quiser
+            })
+          }
+
           console.log("📞 Call was finished")
           setCallFinished(true)
 
@@ -350,6 +379,14 @@ export default function ClickToCallSystem() {
             resetCallState()
             updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
           }, 1500)
+
+          if (hubspotSdk.current && activeCall?.id) {
+            hubspotSdk.current.notifyCallEnded({
+              externalCallId: activeCall.id,
+              status: "NO_ANSWER",
+              durationSeconds: 0,
+            })
+          }
         break
 
         case "disconnected":
