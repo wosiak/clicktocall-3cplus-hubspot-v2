@@ -1,6 +1,6 @@
 "use client"
 
-import { CallingExtensionSdk } from '@hubspot/calling-extensions-sdk';
+import { callingExtensionsSdk } from '@hubspot/calling-extensions-sdk'
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -56,13 +56,11 @@ export default function ClickToCallSystem() {
   const tokenRef = useRef<string>("")
   const connectionStatusRef = useRef<ConnectionStatus>("disconnected")
   const qualificationsRef = useRef<Qualification[]>([])
-
-  const hubspotSdk = useRef<CallingExtensionSdk | null>(null) // Mudei aqui
+  const hubspotSdk = useRef<any>(null)
 
 useEffect(() => {
-  const sdk = new CallingExtensionSdk()
-  sdk.init()
-  hubspotSdk.current = sdk
+  callingExtensionsSdk.init()
+  hubspotSdk.current = callingExtensionsSdk
   console.log("✅ HubSpot SDK initialized")
 }, [])
 // Até aqui
