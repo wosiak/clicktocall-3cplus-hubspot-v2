@@ -15,6 +15,10 @@ const nextConfig = {
         source: '/(.*)',
         headers: [
           {
+            key: 'X-Frame-Options',
+            value: 'ALLOW-FROM https://app.hubspot.com',
+          },
+          {
             key: 'Content-Security-Policy',
             value: 'frame-ancestors https://app.hubspot.com;',
           },
