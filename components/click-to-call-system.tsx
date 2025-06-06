@@ -170,7 +170,7 @@ export default function ClickToCallSystem() {
     [agentStatus, updateStatus],
   )
 
-  const makeCall = useCallback(async (number?: unknown) => {
+  const makeCall = useCallback(async (number?: string | number | null) => {
     const target = number != null ? String(number) : phoneNumber
     if (!target.trim() || agentStatus !== "logged_in") {
       updateStatus("Insira um número válido", "error")
