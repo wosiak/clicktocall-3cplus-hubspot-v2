@@ -21,7 +21,7 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
       },
       onDialNumber: (payload: any) => {
         const number = payload?.toNumber || payload?.phoneNumber || payload?.number
-        if (number) handlers.dial(number)
+        if (number != null) handlers.dial(String(number))
       },
       onEndCall: () => {
         handlers.hangup()
