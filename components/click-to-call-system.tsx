@@ -170,8 +170,9 @@ export default function ClickToCallSystem() {
     [agentStatus, updateStatus],
   )
 
-  const makeCall = useCallback(async (number?: string) => {
-    const target = number ?? phoneNumber
+  const makeCall = useCallback(async (number?: string | number | null) => {
+    const target = number != null ? String(number) : phoneNumber
+
     if (!target.trim() || agentStatus !== "logged_in") {
       updateStatus("Insira um número válido", "error")
       return
@@ -651,7 +652,7 @@ export default function ClickToCallSystem() {
         )}
 
         {agentStatus === "logged_in" && (
-          <Button onClick={makeCall} disabled={isLoading || !phoneNumber.trim()} className="w-full">
+          <Button onClick={() => makeCall()} disabled={isLoading || !phoneNumber.trim()} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
