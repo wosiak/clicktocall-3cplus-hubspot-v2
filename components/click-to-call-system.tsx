@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { AlertCircle, CheckCircle, Phone, Loader2, Wifi, WifiOff } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { io, type Socket } from "socket.io-client"
+import { initHubspotCallProvider } from "@/lib/hubspot-call-provider"
 
 // Types
 interface Campaign {
@@ -169,8 +170,9 @@ export default function ClickToCallSystem() {
     [agentStatus, updateStatus],
   )
 
-  const makeCall = useCallback(async () => {
-    if (!phoneNumber.trim() || agentStatus !== "logged_in") {
+  const makeCall = useCallback(async (number?: string) => {
+    const target = typeof number === "string" ? number : phoneNumber
+    if (!target.trim() || agentStatus !== "logged_in") {
       updateStatus("Insira um número válido", "error")
       return
     }
@@ -185,12 +187,12 @@ export default function ClickToCallSystem() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone: phoneNumber }),
+          body: JSON.stringify({ phone: target }),
         },
       )
 
       if (!response.ok) throw new Error(`Dial failed: HTTP ${response.status}`)
-      updateStatus(`Discando para ${phoneNumber}...`, "info")
+      updateStatus(`Discando para ${target}...`, "info")
     } catch (error) {
       console.error("❌ Call error:", error)
       updateStatus("Erro ao iniciar chamada", "error")
@@ -255,6 +257,17 @@ export default function ClickToCallSystem() {
       setIsLoading(false)
     }
   }, [activeCall, updateStatus])
+
+  // Initialize HubSpot calling bridge
+  useEffect(() => {
+    initHubspotCallProvider({
+      dial: (num: string) => makeCall(num),
+      hangup: hangupCall,
+      qualify: (qId: string) => {
+        qualifyCall({ id: Number(qId), name: qId })
+      },
+    })
+  }, [makeCall, hangupCall, qualifyCall])
 
   const handleSocketEvent = useCallback(
     (event: string, data: any) => {
@@ -638,7 +651,7 @@ export default function ClickToCallSystem() {
         )}
 
         {agentStatus === "logged_in" && (
-          <Button onClick={makeCall} disabled={isLoading || !phoneNumber.trim()} className="w-full">
+          <Button onClick={() => makeCall()} disabled={isLoading || !phoneNumber.trim()} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
