@@ -187,7 +187,18 @@ export default function ClickToCallSystem() {
   )
 
   const makeCall = useCallback(async (number?: string) => {
-    const target = String(number ?? phoneNumber) // Garante que seja sempre uma string
+    // Garantir que o valor seja sempre uma string válida
+    let target = ""
+    if (number) {
+      target = String(number)
+    } else if (phoneNumber) {
+      target = String(phoneNumber)
+    }
+    
+    console.log("[3C Plus] makeCall - number param:", number)
+    console.log("[3C Plus] makeCall - phoneNumber state:", phoneNumber)
+    console.log("[3C Plus] makeCall - target final:", target)
+    
     if (!target.trim() || agentStatus !== "logged_in") {
       updateStatus("Insira um número válido", "error")
       return
@@ -201,6 +212,8 @@ export default function ClickToCallSystem() {
       // Notifica o HubSpot que uma chamada está sendo iniciada
       notifyOutgoingCall(target)
 
+      console.log("[3C Plus] Enviando para API - phone:", target)
+      
       const response = await fetch(
         `https://app.3c.plus/api/v1/agent/manual_call/dial?api_token=${encodeURIComponent(tokenRef.current)}`,
         {
