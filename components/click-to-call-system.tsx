@@ -190,16 +190,16 @@ export default function ClickToCallSystem() {
     // Garantir que o valor seja sempre uma string válida
     let target = ""
     if (number) {
-      target = String(number)
+      target = String(number).trim()
     } else if (phoneNumber) {
-      target = String(phoneNumber)
+      target = String(phoneNumber).trim()
     }
     
-    console.log("[3C Plus] makeCall - number param:", number)
-    console.log("[3C Plus] makeCall - phoneNumber state:", phoneNumber)
-    console.log("[3C Plus] makeCall - target final:", target)
+    console.log("[3C Plus] makeCall - number param:", number, typeof number)
+    console.log("[3C Plus] makeCall - phoneNumber state:", phoneNumber, typeof phoneNumber)
+    console.log("[3C Plus] makeCall - target final:", target, typeof target)
     
-    if (!target.trim() || agentStatus !== "logged_in") {
+    if (!target || agentStatus !== "logged_in") {
       updateStatus("Insira um número válido", "error")
       return
     }
@@ -212,14 +212,20 @@ export default function ClickToCallSystem() {
       // Notifica o HubSpot que uma chamada está sendo iniciada
       notifyOutgoingCall(target)
 
-      console.log("[3C Plus] Enviando para API - phone:", target)
+      // Criar o payload explicitamente como objeto com string
+      const payload = {
+        phone: target // Garantir que seja string
+      }
+      
+      console.log("[3C Plus] Payload object:", payload)
+      console.log("[3C Plus] Payload JSON:", JSON.stringify(payload))
       
       const response = await fetch(
         `https://app.3c.plus/api/v1/agent/manual_call/dial?api_token=${encodeURIComponent(tokenRef.current)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ phone: target }),
+          body: JSON.stringify(payload),
         },
       )
 
@@ -302,9 +308,11 @@ export default function ClickToCallSystem() {
         qualifyCall({ id: Number(qId), name: qId })
       },
       fillPhoneNumber: (num: string) => {
-        console.log("[3C Plus] Preenchendo campo com número do HubSpot:", num)
-        setPhoneNumber(num)
-        updateStatus(`Número ${num} preenchido pelo HubSpot. Clique em "Discar" para iniciar a chamada.`, "info")
+        console.log("[3C Plus] fillPhoneNumber recebido:", num, typeof num)
+        const cleanNum = String(num).trim()
+        console.log("[3C Plus] fillPhoneNumber limpo:", cleanNum, typeof cleanNum)
+        setPhoneNumber(cleanNum)
+        updateStatus(`Número ${cleanNum} preenchido pelo HubSpot. Clique em "Discar" para iniciar a chamada.`, "info")
       },
     })
   }, [makeCall, hangupCall, qualifyCall, updateStatus])
