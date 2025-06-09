@@ -16,7 +16,7 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
     debugMode: true,
     eventHandlers: {
       onReady: () => {
-        console.log("[HubSpot] SDK ready")
+        console.log("[HubSpot] SDK ready -> 3C Plus")
         hubspotInstance?.initialized({})
       },
       onDialNumber: (payload: any) => {
@@ -32,7 +32,7 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
         }
       },
       defaultEventHandler: (ev: any) => {
-        console.log("[HubSpot] Event", ev)
+        console.log("[HubSpot] Event -> 3C Plus", ev)
       },
     },
   })
