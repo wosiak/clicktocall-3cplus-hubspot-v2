@@ -491,15 +491,43 @@ export default function ClickToCallSystem() {
       return
     }
 
-    const url = `https://app.3c.plus/extension?api_token=${encodeURIComponent(tokenRef.current)}`
-    const popup = window.open(url, "_blank", "width=800,height=600")
-    if (!popup) {
-      updateStatus("Pop-up bloqueado! Libere pop-ups para este site.", "error")
+    // Verificar se já existe um iframe da extensão
+    const existingIframe = document.getElementById('3c-plus-extension-iframe')
+    if (existingIframe) {
+      console.log("📱 Iframe da extensão já existe, reutilizando...")
+      updateStatus("Extensão já carregada. Aguarde a conexão...", "info")
       return
     }
 
-    popup.focus()
-    updateStatus("Extensão aberta. Aguarde a conexão...", "info")
+    // Criar iframe oculto para a extensão
+    const iframe = document.createElement('iframe')
+    iframe.id = '3c-plus-extension-iframe'
+    iframe.src = `https://app.3c.plus/extension?api_token=${encodeURIComponent(tokenRef.current)}`
+    iframe.style.display = 'none' // Tornar invisível
+    iframe.style.width = '0px'
+    iframe.style.height = '0px'
+    iframe.style.border = 'none'
+    iframe.style.position = 'absolute'
+    iframe.style.top = '-9999px'
+    iframe.style.left = '-9999px'
+    
+    // Adicionar ao body da página
+    document.body.appendChild(iframe)
+    
+    console.log("📱 Iframe da extensão criado e adicionado à página")
+    updateStatus("Extensão carregada em segundo plano. Aguarde a conexão...", "info")
+
+    // Cleanup function para remover o iframe quando necessário
+    const cleanup = () => {
+      const iframeToRemove = document.getElementById('3c-plus-extension-iframe')
+      if (iframeToRemove) {
+        document.body.removeChild(iframeToRemove)
+        console.log("📱 Iframe da extensão removido")
+      }
+    }
+
+    // Armazenar a função de cleanup para uso posterior
+    ;(window as any).cleanup3CPlusExtension = cleanup
   }, [updateStatus])
 
   const startConnection = useCallback(() => {
@@ -520,6 +548,12 @@ export default function ClickToCallSystem() {
       if (socketRef.current) {
         socketRef.current.removeAllListeners()
         socketRef.current.disconnect()
+      }
+      
+      // Cleanup do iframe da extensão quando o componente for desmontado
+      const cleanup = (window as any).cleanup3CPlusExtension
+      if (cleanup) {
+        cleanup()
       }
     }
   }, [])
@@ -708,7 +742,7 @@ export default function ClickToCallSystem() {
                 Conectando...
               </>
             ) : (
-              "Conectar e Abrir Extensão"
+              "Conectar e Carregar Extensão"
             )}
           </Button>
         )}
