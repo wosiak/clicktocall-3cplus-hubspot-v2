@@ -187,12 +187,12 @@ export default function ClickToCallSystem() {
   )
 
   const makeCall = useCallback(async (number?: string) => {
-    // Garantir que o valor seja sempre uma string válida
+    // Se number for um objeto (evento de clique), ignorar e usar phoneNumber
     let target = ""
-    if (number) {
-      target = String(number).trim()
-    } else if (phoneNumber) {
-      target = String(phoneNumber).trim()
+    if (typeof number === "string" && number.trim()) {
+      target = number.trim()
+    } else {
+      target = String(phoneNumber || "").trim()
     }
     
     console.log("[3C Plus] makeCall - number param:", number, typeof number)
@@ -714,7 +714,7 @@ export default function ClickToCallSystem() {
         )}
 
         {agentStatus === "logged_in" && (
-          <Button onClick={makeCall} disabled={isLoading || !phoneNumber.trim()} className="w-full">
+          <Button onClick={() => makeCall()} disabled={isLoading || !phoneNumber.trim()} className="w-full">
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
