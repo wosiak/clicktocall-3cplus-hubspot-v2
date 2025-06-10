@@ -58,6 +58,7 @@ export default function ClickToCallSystem() {
   // Track call completion states
   const [isCallQualified, setIsCallQualified] = useState(false)
   const [callFinished, setCallFinished] = useState(false)
+  const [isNotAnsweredCall, setIsNotAnsweredCall] = useState(false) // Novo estado para chamadas não atendidas
 
   const socketRef = useRef<Socket | null>(null)
   const tokenRef = useRef<string>("")
@@ -97,17 +98,44 @@ export default function ClickToCallSystem() {
 
   // Watch for both conditions to be met and automatically transition to dial
   useEffect(() => {
-    if (isCallQualified && callFinished && activeCall) {
-      console.log("✅ Both qualification and call finished - transitioning to dial")
+    // Este useEffect deve ser acionado quando a chamada termina (callFinished)
+    // e há um activeCall para processar, independentemente da qualificação inicial.
+    if (callFinished && activeCall) {
+      console.log("✅ Call finished - processing completion")
 
-      // Notifica o HubSpot que a chamada foi completada
-      const engagementData = selectedQualification ? {
-        notes: `Chamada qualificada como: ${selectedQualification.name}`,
-        subject: `Chamada - ${activeCall.phone}`,
-        qualification: selectedQualification
-      } : undefined
-      
-      notifyCallCompleted(activeCall, engagementData)
+      let engagementData = undefined
+      let currentHsCallStatus = 'COMPLETED' // Default
+
+      if (isCallQualified && selectedQualification) {
+        // Cenário de chamada atendida e qualificada
+        engagementData = {
+          notes: `Chamada qualificada como: ${selectedQualification.name}`,
+          subject: `Chamada - ${activeCall.phone}`,
+          qualification: selectedQualification
+        }
+        currentHsCallStatus = 'COMPLETED'
+      } else if (!isCallQualified && agentStatus === "call_answered") {
+        // Cenário de chamada atendida mas não qualificada (ex: desligou antes de qualificar)
+        engagementData = {
+          notes: `Chamada finalizada sem qualificação.`,
+          subject: `Chamada - ${activeCall.phone}`,
+        }
+        currentHsCallStatus = 'CANCELED' // Ou outro status apropriado para não qualificada
+      } else if (isNotAnsweredCall) { // Usar o novo estado para identificar chamadas não atendidas
+        // Cenário de chamada não atendida
+        engagementData = {
+          notes: `Chamada não atendida.`,
+          subject: `Chamada não atendida - ${activeCall.phone}`,
+        }
+        currentHsCallStatus = 'NO_ANSWER'
+      }
+
+      console.log("[3C Plus] Calling notifyCallCompleted with activeCall:", activeCall)
+      console.log("[3C Plus] Calling notifyCallCompleted with engagementData:", engagementData)
+      console.log("[3C Plus] Determined hsCallStatus for completion:", currentHsCallStatus)
+
+      // Passar o hsCallStatus diretamente para notifyCallCompleted
+      notifyCallCompleted(activeCall, { ...engagementData, hsCallStatus: currentHsCallStatus })
 
       // Show completion message
       updateStatus(`Ligação finalizada: ${activeCall.phone}. Pronto para nova ligação.`, "success")
@@ -121,7 +149,7 @@ export default function ClickToCallSystem() {
         updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
       }, 1500)
     }
-  }, [isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState])
+  }, [callFinished, activeCall, isCallQualified, selectedQualification, agentStatus, isNotAnsweredCall, selectedCampaign, updateStatus, resetCallState])
 
   const fetchCampaigns = useCallback(async () => {
     if (!tokenRef.current || connectionStatusRef.current !== "connected") {
@@ -418,6 +446,7 @@ export default function ClickToCallSystem() {
           setQualifications(qualificationsRef.current)
           setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
           setIsCallQualified(false) // Ainda não foi qualificada
+          setIsNotAnsweredCall(true) // Marcar como chamada não atendida
         break
 
         case "disconnected":
@@ -496,7 +525,7 @@ export default function ClickToCallSystem() {
     const iframe = document.createElement('iframe')
     iframe.id = '3c-plus-extension-iframe'
     iframe.src = `https://app.3c.plus/extension?api_token=${encodeURIComponent(tokenRef.current)}`
-    iframe.setAttribute('allow', 'microphone; autoplay');
+    iframe.setAttribute('allow', 'microphone; autoplay')
     iframe.style.display = 'none' // Tornar invisível
     iframe.style.width = '0px'
     iframe.style.height = '0px'
