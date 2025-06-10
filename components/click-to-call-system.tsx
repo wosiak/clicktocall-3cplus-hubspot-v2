@@ -405,26 +405,19 @@ export default function ClickToCallSystem() {
           // The useEffect will handle the transition if qualification is also complete
           break
 
-        case "call-was-not-answered": // Editando aqui, casos de clientes que não atendem a ligação (deixam tocando).
-          updateStatus("Ligação não foi atendida pelo cliente.", "warning")
+        case "call-was-not-answered": // Casos de clientes que não atendem a ligação (deixam tocando).
+          updateStatus("Ligação não foi atendida pelo cliente. Selecione uma qualificação.", "info")
           
           // Notifica o HubSpot que a chamada foi finalizada (não atendida)
           if (activeCall) {
             notifyCallEnded(activeCall)
-            notifyCallCompleted(activeCall, {
-              notes: "Chamada não foi atendida pelo cliente",
-              subject: `Chamada não atendida - ${activeCall.phone}`
-            })
           }
           
-          setAgentStatus("logged_in")
-          setCallFinished(false)
-          setIsCallQualified(false)
-
-          setTimeout(() => {
-            resetCallState()
-            updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
-          }, 1500)
+          // Definir como call_answered para mostrar as qualificações
+          setAgentStatus("call_answered")
+          setQualifications(qualificationsRef.current)
+          setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
+          setIsCallQualified(false) // Ainda não foi qualificada
         break
 
         case "disconnected":
