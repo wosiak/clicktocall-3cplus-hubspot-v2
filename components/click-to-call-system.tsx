@@ -52,7 +52,7 @@ export default function ClickToCallSystem() {
   const [activeCall, setActiveCall] = useState<CallData | null>(null)
   const [qualifications, setQualifications] = useState<Qualification[]>([])
   const [selectedQualification, setSelectedQualification] = useState<Qualification | null>(null)
-  const [status, setStatus] = useState<StatusMessage>({ message: "Insira seu token para começar", type: "info" })
+  const [status, setStatus] = useState<StatusMessage>({ message: "Insira um Token de Operador para começar", type: "info" })
   const [isLoading, setIsLoading] = useState(false)
 
   // Track call completion states
@@ -565,7 +565,7 @@ export default function ClickToCallSystem() {
 
   const getStatusDescription = () => {
     if (connectionStatus === "disconnected") {
-      return "Insira seu token e conecte à extensão"
+      return ""
     }
     if (connectionStatus === "connecting") {
       return "Conectando..."
@@ -624,7 +624,7 @@ export default function ClickToCallSystem() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Phone className="h-5 w-5" />
-          3C Plus Click-to-Call System
+          3C Plus |  Click-to-Call
           {getConnectionIcon()}
         </CardTitle>
         <CardDescription>{getStatusDescription()}</CardDescription>
@@ -642,13 +642,13 @@ export default function ClickToCallSystem() {
 
         {connectionStatus === "disconnected" && (
           <div className="space-y-2">
-            <Label htmlFor="token">Agent Token</Label>
+            <Label htmlFor="token">Token de Operador:</Label>
             <Input
               id="token"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Insira seu Agent Token"
+              placeholder="Insira o Token de Operador aqui"
               disabled={isLoading}
             />
           </div>
@@ -736,7 +736,7 @@ export default function ClickToCallSystem() {
                 Conectando...
               </>
             ) : (
-              "Conectar e Carregar Extensão"
+              "Conectar"
             )}
           </Button>
         )}
