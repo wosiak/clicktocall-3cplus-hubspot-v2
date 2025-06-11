@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { AlertCircle, CheckCircle, PhoneCall, Loader2, Wifi, WifiOff } from "lucide-react"
+import { AlertCircle, CheckCircle, Phone, Loader2, Wifi, WifiOff } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { io, type Socket } from "socket.io-client"
 import { 
@@ -52,7 +52,7 @@ export default function ClickToCallSystem() {
   const [activeCall, setActiveCall] = useState<CallData | null>(null)
   const [qualifications, setQualifications] = useState<Qualification[]>([])
   const [selectedQualification, setSelectedQualification] = useState<Qualification | null>(null)
-  const [status, setStatus] = useState<StatusMessage>({ message: "Insira o seu Token de Operador", type: "info" })
+  const [status, setStatus] = useState<StatusMessage>({ message: "Insira seu token para começar", type: "info" })
   const [isLoading, setIsLoading] = useState(false)
 
   // Track call completion states
@@ -565,7 +565,7 @@ export default function ClickToCallSystem() {
 
   const getStatusDescription = () => {
     if (connectionStatus === "disconnected") {
-      return ""
+      return "Insira seu token e conecte à extensão"
     }
     if (connectionStatus === "connecting") {
       return "Conectando..."
@@ -623,8 +623,8 @@ export default function ClickToCallSystem() {
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <PhoneCall color="#FFBC25" className="h-5 w-5" />
-          3C Plus | Click-to-Call
+          <Phone className="h-5 w-5" />
+          3C Plus Click-to-Call System
           {getConnectionIcon()}
         </CardTitle>
         <CardDescription>{getStatusDescription()}</CardDescription>
@@ -642,13 +642,13 @@ export default function ClickToCallSystem() {
 
         {connectionStatus === "disconnected" && (
           <div className="space-y-2">
-            <Label htmlFor="token">Token de Operador:</Label>
+            <Label htmlFor="token">Agent Token</Label>
             <Input
               id="token"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Digite aqui seu Token de Operador"
+              placeholder="Insira seu Agent Token"
               disabled={isLoading}
             />
           </div>
@@ -736,7 +736,7 @@ export default function ClickToCallSystem() {
                 Conectando...
               </>
             ) : (
-              "Conectar"
+              "Conectar e Carregar Extensão"
             )}
           </Button>
         )}
