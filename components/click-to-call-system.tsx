@@ -565,7 +565,7 @@ export default function ClickToCallSystem() {
 
   const getStatusDescription = () => {
     if (connectionStatus === "disconnected") {
-      return ""
+      return "Insira seu token e conecte à extensão"
     }
     if (connectionStatus === "connecting") {
       return "Conectando..."
@@ -623,8 +623,8 @@ export default function ClickToCallSystem() {
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Phone color="#ffbc25" className="h-5 w-5" />
-          3C Plus | Click-to-Call
+          <Phone className="h-5 w-5" />
+          3C Plus Click-to-Call System
           {getConnectionIcon()}
         </CardTitle>
         <CardDescription>{getStatusDescription()}</CardDescription>
@@ -642,13 +642,13 @@ export default function ClickToCallSystem() {
 
         {connectionStatus === "disconnected" && (
           <div className="space-y-2">
-            <Label htmlFor="token">Token do Operador:</Label>
+            <Label htmlFor="token">Agent Token</Label>
             <Input
               id="token"
               type="password"
               value={token}
               onChange={(e) => setToken(e.target.value)}
-              placeholder="Insira seu Token de Usuário"
+              placeholder="Insira seu Agent Token"
               disabled={isLoading}
             />
           </div>
