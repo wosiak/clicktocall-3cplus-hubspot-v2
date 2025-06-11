@@ -264,7 +264,7 @@ export default function ClickToCallSystem() {
 
         // Set selected qualification immediately for UI feedback
         setSelectedQualification(qualification)
-        updateStatus(`Qualificando: ${qualification.name}...`, "loading")
+        updateStatus(`Qualificação usada: ${qualification.name}`, "success")
       } catch (error) {
         console.error("❌ Qualification error:", error)
         updateStatus("Erro ao qualificar chamada", "error")
@@ -375,7 +375,7 @@ export default function ClickToCallSystem() {
 
           if (qualificationUsed) {
             setSelectedQualification({ id: qualificationUsed.id, name: qualificationUsed.name })
-            updateStatus(`Qualificada: ${qualificationUsed.name}`, "success")
+            updateStatus(``, "success")
           } else {
             updateStatus("Ligação qualificada com sucesso!", "success")
           }
@@ -574,7 +574,7 @@ export default function ClickToCallSystem() {
       return "Escolha uma campanha para fazer login"
     }
     if (agentStatus === "logged_in") {
-      return `Campanha: ${selectedCampaign?.name || "Ativa"} - Insira um número para discar`
+      return `Campanha: ${selectedCampaign?.name || "Ativa"}`
     }
     if (agentStatus === "dialing") {
       return "Discando..."
@@ -588,7 +588,7 @@ export default function ClickToCallSystem() {
       }
       return isCallQualified
         ? "Ligação qualificada - Pode encerrar quando quiser"
-        : "Ligação atendida - Qualifique quando necessário"
+        : ""
     }
     if (agentStatus === "call_qualified") {
       return `Qualificada: ${selectedQualification?.name || "Sucesso"}`
@@ -675,12 +675,12 @@ export default function ClickToCallSystem() {
 
         {agentStatus === "logged_in" && (
           <div className="space-y-2">
-            <Label htmlFor="phone-number">Número do Cliente</Label>
+            <Label htmlFor="phone-number">Digite o número desejado:</Label>
             <Input
               id="phone-number"
               value={phoneNumber}
               onChange={(e) => setPhoneNumber(e.target.value)}
-              placeholder="Ex: +5511999999999"
+              placeholder="Ex: 5511999998888"
               disabled={isLoading}
             />
           </div>
@@ -688,13 +688,13 @@ export default function ClickToCallSystem() {
 
         {showCallInfo && (
           <div className="p-4 bg-muted rounded-lg">
-            <h3 className="font-medium mb-2">Informações da Ligação</h3>
+            <h3 className="font-medium mb-2">Informações da Ligação:</h3>
             <p className="text-sm text-muted-foreground">
               <strong>Número:</strong> {activeCall.phone}
             </p>
-            <p className="text-sm text-muted-foreground">
+            {/*<p className="text-sm text-muted-foreground">
               <strong>ID:</strong> {activeCall.id}
-            </p>
+            </p>*/}
             <p className="text-sm text-muted-foreground">
               <strong>Status:</strong> {callFinished ? "Finalizada" : "Ativa"}
             </p>
@@ -709,7 +709,7 @@ export default function ClickToCallSystem() {
 
         {showQualificationButtons && (
           <div className="space-y-3">
-            <Label>{callFinished ? "Selecione uma qualificação para finalizar:" : "Qualificar Ligação"}</Label>
+            <Label>{callFinished ? "Selecione uma qualificação para finalizar:" : "Qualifique a ligação:"}</Label>
             <div className="grid gap-2">
               {qualifications.map((qualification) => (
                 <Button
@@ -765,7 +765,7 @@ export default function ClickToCallSystem() {
                 Encerrando...
               </>
             ) : (
-              "Encerrar Ligação"
+              "Desligar"
             )}
           </Button>
         )}
