@@ -76,7 +76,7 @@ export default function ClickToCallSystem() {
     setStatus({ message, type })
   }, [])
 
-  const resetCallState = useCallback(() => {
+  /* Antes const resetCallState = useCallback(() => {
     console.log("🧹 Resetting call state completely")
     setActiveCall(null)
     setQualifications([])
@@ -86,7 +86,21 @@ export default function ClickToCallSystem() {
     qualificationsRef.current = []
     setPhoneNumber("")
     setIsLoading(false)
-  }, [])
+  }, []) */
+
+  // AGORA:
+const resetCallState = useCallback(() => {
+  console.log("🧹 Resetting call state completely")
+  setActiveCall(null)
+  setQualifications([])
+  setSelectedQualification(null)
+  setIsCallQualified(false)
+  setCallFinished(false)
+  setCallStatus('COMPLETED') // Reset do status da chamada
+  qualificationsRef.current = []
+  setPhoneNumber("")
+  setIsLoading(false)
+}, [])
 
   const resetAllState = useCallback(() => {
     setCampaigns([])
@@ -94,6 +108,9 @@ export default function ClickToCallSystem() {
     setAgentStatus("idle")
     resetCallState()
   }, [resetCallState])
+
+  // Antes, nada! Agora (linha abaixo):
+  const [callStatus, setCallStatus] = useState<string>('COMPLETED')
 
   // Watch for both conditions to be met and automatically transition to dial
   useEffect(() => {
@@ -107,7 +124,8 @@ export default function ClickToCallSystem() {
         qualification: selectedQualification
       } : undefined
       
-      notifyCallCompleted(activeCall, engagementData)
+      // Antes: notifyCallCompleted(activeCall, engagementData). Agora (linha abaixo):
+      notifyCallCompleted(activeCall, engagementData, callStatus)
 
       // Show completion message
       updateStatus(`Ligação finalizada: ${activeCall.phone}. Pronto para nova ligação.`, "success")
@@ -121,7 +139,7 @@ export default function ClickToCallSystem() {
         updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
       }, 1500)
     }
-  }, [isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState])
+  }, /* Antes: [isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState])*/[isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState, callStatus]) 
 
   const fetchCampaigns = useCallback(async () => {
     if (!tokenRef.current || connectionStatusRef.current !== "connected") {
@@ -390,6 +408,7 @@ export default function ClickToCallSystem() {
         case "call-was-finished":
           console.log("📞 Call was finished")
           setCallFinished(true)
+          setCallStatus('COMPLETED') // Adicionado agora
 
           if (!isCallQualified) {
             // Call ended but not qualified yet - show qualification options
@@ -418,6 +437,7 @@ export default function ClickToCallSystem() {
           setQualifications(qualificationsRef.current)
           setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
           setIsCallQualified(false) // Ainda não foi qualificada
+          setCallStatus('NO_ANSWER') // Adicionado agora
         break
 
         case "disconnected":

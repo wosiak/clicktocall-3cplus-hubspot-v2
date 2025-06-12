@@ -11,6 +11,7 @@ export interface CallData {
   id: string
   phone: string
   telephony_id: string
+  status?: 'COMPLETED' | 'FAILED' | 'BUSY' | 'NO_ANSWER' | 'CANCELED'
 }
 
 let hubspotInstance: CallingExtensions | null = null
@@ -106,17 +107,18 @@ export function notifyCallEnded(callData: CallData) {
 }
 
 // Notifica o HubSpot que o processo de chamada foi completado
-export function notifyCallCompleted(callData: CallData, engagementData?: any) {
+export function notifyCallCompleted(callData: CallData, engagementData?: any, callStatus: string = 'COMPLETED') {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
 
-  console.log("[HubSpot] Notifying call completed:", callData.phone)
+  console.log("[HubSpot] Notifying call completed:", callData.phone, "with status:", callStatus)
   
   const completionData: any = {
     externalCallId: callData.id || callData.telephony_id,
-    callEndTime: Date.now()
+    callEndTime: Date.now(),
+    hsCallStatus: callStatus // Campo obrigatório adicionado
   }
 
   // Se temos dados de engagement, incluímos
@@ -143,3 +145,4 @@ export function getHubspotInstance() {
 export function getCurrentEngagementId() {
   return currentEngagementId
 }
+
