@@ -440,6 +440,22 @@ const resetCallState = useCallback(() => {
           setCallStatus('NO_ANSWER') // Adicionado agora
         break
 
+        case "call-was-failed":
+          updateStatus("Ligação falhou!", "info")
+          
+          // Notifica o HubSpot que a chamada foi finalizada (falhou)
+          if (activeCall) {
+            notifyCallEnded(activeCall)
+          }
+          
+          // Definindo como call_answered para mostrar as qualificações
+          setAgentStatus("call_answered")
+          setQualifications(qualificationsRef.current)
+          setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
+          setIsCallQualified(false) // Ainda não foi qualificada
+          setCallStatus('NO_ANSWER') // Não foi atendida
+        break
+
         case "disconnected":
           setConnectionStatus("disconnected")
           setAgentStatus("idle")
