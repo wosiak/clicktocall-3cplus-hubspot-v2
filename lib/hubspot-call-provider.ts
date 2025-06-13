@@ -70,13 +70,20 @@ export function notifyOutgoingCall(phoneNumber: string, callId?: string) {
     return
   }
 
-  console.log("[HubSpot] Notifying outgoing call:", phoneNumber)
-  hubspotInstance.outgoingCall({
+  console.log("[HubSpot] Notifying outgoing call:", phoneNumber, "with callId:", callId)
+  
+  const outgoingCallData: any = {
     phoneNumber,
     callStartTime: Date.now(),
-    createEngagement: true,
-    ...(callId && { callId })
-  })
+    createEngagement: true
+  }
+
+  // Adiciona o callId se fornecido
+  if (callId) {
+    outgoingCallData.callId = callId
+  }
+
+  hubspotInstance.outgoingCall(outgoingCallData)
 }
 
 // Notifica o HubSpot que uma chamada foi atendida
@@ -86,9 +93,16 @@ export function notifyCallAnswered(callData: CallData) {
     return
   }
 
-  console.log("[HubSpot] Notifying call answered:", callData.phone)
+  // Garantir que temos um externalCallId válido
+  const externalCallId = callData.id || callData.telephony_id
+  if (!externalCallId) {
+    console.error("[HubSpot] Cannot notify call answered - no valid externalCallId")
+    return
+  }
+
+  console.log("[HubSpot] Notifying call answered:", callData.phone, "with externalCallId:", externalCallId)
   hubspotInstance.callAnswered({
-    externalCallId: callData.id || callData.telephony_id
+    externalCallId: externalCallId
   })
 }
 
@@ -99,9 +113,16 @@ export function notifyCallEnded(callData: CallData) {
     return
   }
 
-  console.log("[HubSpot] Notifying call ended:", callData.phone)
+  // Garantir que temos um externalCallId válido
+  const externalCallId = callData.id || callData.telephony_id
+  if (!externalCallId) {
+    console.error("[HubSpot] Cannot notify call ended - no valid externalCallId")
+    return
+  }
+
+  console.log("[HubSpot] Notifying call ended:", callData.phone, "with externalCallId:", externalCallId)
   hubspotInstance.callEnded({
-    externalCallId: callData.id || callData.telephony_id,
+    externalCallId: externalCallId,
     callEndTime: Date.now()
   })
 }
@@ -113,17 +134,26 @@ export function notifyCallCompleted(callData: CallData, engagementData?: any, ca
     return
   }
 
-  console.log("[HubSpot] Notifying call completed:", callData.phone, "with status:", callStatus)
+  // Garantir que temos um externalCallId válido
+  const externalCallId = callData.id || callData.telephony_id
+  if (!externalCallId) {
+    console.error("[HubSpot] Cannot notify call completed - no valid externalCallId")
+    return
+  }
+
+  console.log("[HubSpot] Notifying call completed:", callData.phone, "with status:", callStatus, "and externalCallId:", externalCallId)
   
   const completionData: any = {
-    externalCallId: callData.id || callData.telephony_id,
+    externalCallId: externalCallId,
     callEndTime: Date.now(),
-    hsCallStatus: callStatus // Campo obrigatório adicionado
+    hsCallStatus: callStatus // Campo obrigatório
   }
 
   // Se temos dados de engagement, incluímos
   if (engagementData || currentEngagementId) {
-    completionData.engagementId = currentEngagementId
+    if (currentEngagementId) {
+      completionData.engagementId = currentEngagementId
+    }
     if (engagementData) {
       completionData.body = engagementData.notes || `Chamada para ${callData.phone}`
       completionData.subject = engagementData.subject || `Chamada - ${callData.phone}`
