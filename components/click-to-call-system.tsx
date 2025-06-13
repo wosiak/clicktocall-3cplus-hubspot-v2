@@ -14,7 +14,6 @@ import {
   notifyCallAnswered, 
   notifyCallEnded, 
   notifyCallCompleted,
-  setCurrentCallId,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
 
@@ -33,7 +32,6 @@ interface CallData {
   id: string
   phone: string
   telephony_id: string
-  callId?: string // Adicionado para rastrear o callId do HubSpot
 }
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected"
@@ -60,7 +58,7 @@ export default function ClickToCallSystem() {
   // Track call completion states
   const [isCallQualified, setIsCallQualified] = useState(false)
   const [callFinished, setCallFinished] = useState(false)
-  const [callStatus, setCallStatus] = useState<string>('COMPLETED')
+  const [callStatus, setCallStatus] = useState<string>("COMPLETED")
 
   const socketRef = useRef<Socket | null>(null)
   const tokenRef = useRef<string>("")
@@ -86,7 +84,7 @@ export default function ClickToCallSystem() {
     setSelectedQualification(null)
     setIsCallQualified(false)
     setCallFinished(false)
-    setCallStatus('COMPLETED') // Reset do status da chamada
+    setCallStatus("COMPLETED") // Reset do status da chamada
     qualificationsRef.current = []
     setPhoneNumber("")
     setIsLoading(false)
@@ -213,10 +211,6 @@ export default function ClickToCallSystem() {
       setAgentStatus("dialing")
       updateStatus("Iniciando chamada...", "loading")
 
-      // Gerar callId único e notificar o HubSpot que uma chamada está sendo iniciada
-      const callId = notifyOutgoingCall(target)
-      console.log("[3C Plus] Generated callId for HubSpot:", callId)
-
       // Criar o payload explicitamente como objeto com string
       const payload = {
         phone: target // Garantir que seja string
@@ -235,9 +229,6 @@ export default function ClickToCallSystem() {
       )
 
       if (!response.ok) throw new Error(`Dial failed: HTTP ${response.status}`)
-      
-      // Armazenar o callId para uso posterior
-      setCurrentCallId(callId)
       
       updateStatus(`Discando para ${target}...`, "info")
     } catch (error) {
@@ -352,10 +343,13 @@ export default function ClickToCallSystem() {
             id: data?.call?.id || "",
             phone: data?.call?.phone || phoneNumber,
             telephony_id: data?.call?.telephony_id || "",
-            callId: data?.call?.callId // Preservar o callId se fornecido pelo 3C Plus
           }
           setActiveCall(callData)
           setAgentStatus("in_call")
+
+          // Notifica o HubSpot que uma chamada está sendo iniciada APENAS AGORA
+          // O externalCallId é o telephony_id do 3C Plus
+          notifyOutgoingCall(callData.phone, callData.telephony_id)
 
           // Reset call completion states for new call
           setIsCallQualified(false)
@@ -400,7 +394,7 @@ export default function ClickToCallSystem() {
         case "call-was-finished":
           console.log("📞 Call was finished")
           setCallFinished(true)
-          setCallStatus('COMPLETED')
+          setCallStatus("COMPLETED")
 
           if (!isCallQualified) {
             // Call ended but not qualified yet - show qualification options
@@ -429,7 +423,7 @@ export default function ClickToCallSystem() {
           setQualifications(qualificationsRef.current)
           setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
           setIsCallQualified(false) // Ainda não foi qualificada
-          setCallStatus('NO_ANSWER')
+          setCallStatus("NO_ANSWER")
           break
 
         case "call-was-failed":
@@ -445,7 +439,7 @@ export default function ClickToCallSystem() {
           setQualifications(qualificationsRef.current)
           setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
           setIsCallQualified(false) // Ainda não foi qualificada
-          setCallStatus('FAILED')
+          setCallStatus("FAILED")
           break
 
         case "disconnected":
@@ -513,7 +507,7 @@ export default function ClickToCallSystem() {
     }
 
     // Verificar se já existe um iframe da extensão
-    const existingIframe = document.getElementById('3c-plus-extension-iframe')
+    const existingIframe = document.getElementById("3c-plus-extension-iframe")
     if (existingIframe) {
       console.log("📱 Iframe da extensão já existe, reutilizando...")
       updateStatus("Extensão já carregada. Aguarde a conexão...", "info")
@@ -521,17 +515,17 @@ export default function ClickToCallSystem() {
     }
 
     // Criar iframe oculto para a extensão
-    const iframe = document.createElement('iframe')
-    iframe.id = '3c-plus-extension-iframe'
+    const iframe = document.createElement("iframe")
+    iframe.id = "3c-plus-extension-iframe"
     iframe.src = `https://app.3c.plus/extension?api_token=${encodeURIComponent(tokenRef.current)}`
-    iframe.setAttribute('allow', 'microphone; autoplay');
-    iframe.style.display = 'none' // Tornar invisível
-    iframe.style.width = '0px'
-    iframe.style.height = '0px'
-    iframe.style.border = 'none'
-    iframe.style.position = 'absolute'
-    iframe.style.top = '-9999px'
-    iframe.style.left = '-9999px'
+    iframe.setAttribute("allow", "microphone; autoplay")
+    iframe.style.display = "none" // Tornar invisível
+    iframe.style.width = "0px"
+    iframe.style.height = "0px"
+    iframe.style.border = "none"
+    iframe.style.position = "absolute"
+    iframe.style.top = "-9999px"
+    iframe.style.left = "-9999px"
     
     // Adicionar ao body da página
     document.body.appendChild(iframe)
@@ -541,7 +535,7 @@ export default function ClickToCallSystem() {
 
     // Cleanup function para remover o iframe quando necessário
     const cleanup = () => {
-      const iframeToRemove = document.getElementById('3c-plus-extension-iframe')
+      const iframeToRemove = document.getElementById("3c-plus-extension-iframe")
       if (iframeToRemove) {
         document.body.removeChild(iframeToRemove)
         console.log("📱 Iframe da extensão removido")
@@ -733,7 +727,7 @@ export default function ClickToCallSystem() {
             <div className="space-y-2">
               <p><strong>Número:</strong> {activeCall?.phone}</p>
               <p><strong>ID:</strong> {activeCall?.id}</p>
-              {activeCall?.callId && <p><strong>Call ID (HubSpot):</strong> {activeCall.callId}</p>}
+              <p><strong>Telephony ID (HubSpot External Call ID):</strong> {activeCall?.telephony_id}</p>
               {selectedQualification && (
                 <p><strong>Qualificação:</strong> {selectedQualification.name}</p>
               )}
@@ -770,4 +764,3 @@ export default function ClickToCallSystem() {
     </Card>
   )
 }
-
