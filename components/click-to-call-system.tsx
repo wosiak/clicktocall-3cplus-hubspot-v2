@@ -14,6 +14,7 @@ import {
   notifyCallAnswered, 
   notifyCallEnded, 
   notifyCallCompleted,
+  setCurrentCallId,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
 
@@ -32,6 +33,7 @@ interface CallData {
   id: string
   phone: string
   telephony_id: string
+  callId?: string // Adicionado para rastrear o callId do HubSpot
 }
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected"
@@ -58,6 +60,7 @@ export default function ClickToCallSystem() {
   // Track call completion states
   const [isCallQualified, setIsCallQualified] = useState(false)
   const [callFinished, setCallFinished] = useState(false)
+  const [callStatus, setCallStatus] = useState<string>('COMPLETED')
 
   const socketRef = useRef<Socket | null>(null)
   const tokenRef = useRef<string>("")
@@ -76,31 +79,18 @@ export default function ClickToCallSystem() {
     setStatus({ message, type })
   }, [])
 
-  /* Antes const resetCallState = useCallback(() => {
+  const resetCallState = useCallback(() => {
     console.log("🧹 Resetting call state completely")
     setActiveCall(null)
     setQualifications([])
     setSelectedQualification(null)
     setIsCallQualified(false)
     setCallFinished(false)
+    setCallStatus('COMPLETED') // Reset do status da chamada
     qualificationsRef.current = []
     setPhoneNumber("")
     setIsLoading(false)
-  }, []) */
-
-  // AGORA:
-const resetCallState = useCallback(() => {
-  console.log("🧹 Resetting call state completely")
-  setActiveCall(null)
-  setQualifications([])
-  setSelectedQualification(null)
-  setIsCallQualified(false)
-  setCallFinished(false)
-  setCallStatus('COMPLETED') // Reset do status da chamada
-  qualificationsRef.current = []
-  setPhoneNumber("")
-  setIsLoading(false)
-}, [])
+  }, [])
 
   const resetAllState = useCallback(() => {
     setCampaigns([])
@@ -108,9 +98,6 @@ const resetCallState = useCallback(() => {
     setAgentStatus("idle")
     resetCallState()
   }, [resetCallState])
-
-  // Antes, nada! Agora (linha abaixo):
-  const [callStatus, setCallStatus] = useState<string>('COMPLETED')
 
   // Watch for both conditions to be met and automatically transition to dial
   useEffect(() => {
@@ -124,7 +111,6 @@ const resetCallState = useCallback(() => {
         qualification: selectedQualification
       } : undefined
       
-      // Antes: notifyCallCompleted(activeCall, engagementData). Agora (linha abaixo):
       notifyCallCompleted(activeCall, engagementData, callStatus)
 
       // Show completion message
@@ -139,7 +125,7 @@ const resetCallState = useCallback(() => {
         updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
       }, 1500)
     }
-  }, /* Antes: [isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState])*/[isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState, callStatus]) 
+  }, [isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState, callStatus])
 
   const fetchCampaigns = useCallback(async () => {
     if (!tokenRef.current || connectionStatusRef.current !== "connected") {
@@ -227,8 +213,9 @@ const resetCallState = useCallback(() => {
       setAgentStatus("dialing")
       updateStatus("Iniciando chamada...", "loading")
 
-      // Notifica o HubSpot que uma chamada está sendo iniciada
-      notifyOutgoingCall(target)
+      // Gerar callId único e notificar o HubSpot que uma chamada está sendo iniciada
+      const callId = notifyOutgoingCall(target)
+      console.log("[3C Plus] Generated callId for HubSpot:", callId)
 
       // Criar o payload explicitamente como objeto com string
       const payload = {
@@ -248,6 +235,10 @@ const resetCallState = useCallback(() => {
       )
 
       if (!response.ok) throw new Error(`Dial failed: HTTP ${response.status}`)
+      
+      // Armazenar o callId para uso posterior
+      setCurrentCallId(callId)
+      
       updateStatus(`Discando para ${target}...`, "info")
     } catch (error) {
       console.error("❌ Call error:", error)
@@ -361,6 +352,7 @@ const resetCallState = useCallback(() => {
             id: data?.call?.id || "",
             phone: data?.call?.phone || phoneNumber,
             telephony_id: data?.call?.telephony_id || "",
+            callId: data?.call?.callId // Preservar o callId se fornecido pelo 3C Plus
           }
           setActiveCall(callData)
           setAgentStatus("in_call")
@@ -408,7 +400,7 @@ const resetCallState = useCallback(() => {
         case "call-was-finished":
           console.log("📞 Call was finished")
           setCallFinished(true)
-          setCallStatus('COMPLETED') // Adicionado agora
+          setCallStatus('COMPLETED')
 
           if (!isCallQualified) {
             // Call ended but not qualified yet - show qualification options
@@ -424,7 +416,7 @@ const resetCallState = useCallback(() => {
           // The useEffect will handle the transition if qualification is also complete
           break
 
-        case "call-was-not-answered": // Casos de clientes que não atendem a ligação (deixam tocando).
+        case "call-was-not-answered":
           updateStatus("Ligação não foi atendida pelo cliente. Selecione uma qualificação.", "info")
           
           // Notifica o HubSpot que a chamada foi finalizada (não atendida)
@@ -437,8 +429,8 @@ const resetCallState = useCallback(() => {
           setQualifications(qualificationsRef.current)
           setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
           setIsCallQualified(false) // Ainda não foi qualificada
-          setCallStatus('NO_ANSWER') // Adicionado agora
-        break
+          setCallStatus('NO_ANSWER')
+          break
 
         case "call-was-failed":
           updateStatus("Ligação falhou!", "info")
@@ -453,8 +445,8 @@ const resetCallState = useCallback(() => {
           setQualifications(qualificationsRef.current)
           setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
           setIsCallQualified(false) // Ainda não foi qualificada
-          setCallStatus('NO_ANSWER') // Não foi atendida
-        break
+          setCallStatus('FAILED')
+          break
 
         case "disconnected":
           setConnectionStatus("disconnected")
@@ -467,7 +459,7 @@ const resetCallState = useCallback(() => {
           console.log("🔍 Unhandled socket event:", event, data)
       }
     },
-    [campaigns, selectedCampaign, phoneNumber, isCallQualified, fetchCampaigns, updateStatus, resetAllState],
+    [campaigns, selectedCampaign, phoneNumber, isCallQualified, activeCall, fetchCampaigns, updateStatus, resetAllState],
   )
 
   const connectSocket = useCallback(() => {
@@ -660,7 +652,7 @@ const resetCallState = useCallback(() => {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Phone className="h-5 w-5" />
-          3C Plus |  Click-to-Call
+          3C Plus | Click-to-Call
           {getConnectionIcon()}
         </CardTitle>
         <CardDescription>{getStatusDescription()}</CardDescription>
@@ -677,22 +669,28 @@ const resetCallState = useCallback(() => {
         )}
 
         {connectionStatus === "disconnected" && (
-          <div className="space-y-2">
-            <Label htmlFor="token">Token de Operador:</Label>
-            <Input
-              id="token"
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Insira o Token de Operador aqui"
-              disabled={isLoading}
-            />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="token">Token de Operador</Label>
+              <Input
+                id="token"
+                type="password"
+                placeholder="Insira seu token de operador"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <Button onClick={startConnection} disabled={!token.trim() || isLoading} className="w-full">
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Conectar
+            </Button>
           </div>
         )}
 
-        {connectionStatus === "connected" && campaigns.length > 0 && agentStatus === "idle" && (
-          <div className="space-y-3">
-            <Label>Selecione uma Campanha</Label>
+        {connectionStatus === "connected" && campaigns.length > 0 && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Campanhas Disponíveis</h3>
             <div className="grid gap-2">
               {campaigns.map((campaign) => (
                 <Button
@@ -710,49 +708,49 @@ const resetCallState = useCallback(() => {
         )}
 
         {agentStatus === "logged_in" && (
-          <div className="space-y-2">
-            <Label htmlFor="phone-number">Digite o número desejado:</Label>
-            <Input
-              id="phone-number"
-              value={phoneNumber}
-              onChange={(e) => setPhoneNumber(e.target.value)}
-              placeholder="Ex: 5511999998888"
-              disabled={isLoading}
-            />
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="phone">Digite o número desejado:</Label>
+              <Input
+                id="phone"
+                type="tel"
+                placeholder="Ex: 5511999998888"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <Button onClick={() => makeCall()} disabled={!phoneNumber.trim() || isLoading} className="w-full">
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
+              Discar
+            </Button>
           </div>
         )}
 
         {showCallInfo && (
-          <div className="p-4 bg-muted rounded-lg">
-            <h3 className="font-medium mb-2">Informações da Ligação:</h3>
-            <p className="text-sm text-muted-foreground">
-              <strong>Número:</strong> {activeCall.phone}
-            </p>
-            {/*<p className="text-sm text-muted-foreground">
-              <strong>ID:</strong> {activeCall.id}
-            </p>*/}
-            <p className="text-sm text-muted-foreground">
-              <strong>Status:</strong> {callFinished ? "Finalizada" : "Ativa"}
-            </p>
-            {selectedQualification && (
-              <p className="text-sm text-muted-foreground">
-                <strong>Qualificação:</strong> {selectedQualification.name}
-              </p>
-            )}
-            {isCallQualified && <p className="text-sm text-green-600 font-medium">✅ Ligação qualificada</p>}
+          <div className="space-y-4 p-4 bg-blue-50 rounded-lg">
+            <h3 className="text-lg font-semibold">Ligação Ativa</h3>
+            <div className="space-y-2">
+              <p><strong>Número:</strong> {activeCall?.phone}</p>
+              <p><strong>ID:</strong> {activeCall?.id}</p>
+              {activeCall?.callId && <p><strong>Call ID (HubSpot):</strong> {activeCall.callId}</p>}
+              {selectedQualification && (
+                <p><strong>Qualificação:</strong> {selectedQualification.name}</p>
+              )}
+            </div>
           </div>
         )}
 
         {showQualificationButtons && (
-          <div className="space-y-3">
-            <Label>{callFinished ? "Selecione uma qualificação para finalizar:" : "Qualifique a ligação:"}</Label>
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Qualificar Ligação</h3>
             <div className="grid gap-2">
               {qualifications.map((qualification) => (
                 <Button
                   key={qualification.id}
-                  variant="outline"
+                  variant={selectedQualification?.id === qualification.id ? "default" : "outline"}
                   onClick={() => qualifyCall(qualification)}
-                  disabled={isLoading}
+                  disabled={isLoading || selectedQualification?.id === qualification.id}
                   className="justify-start"
                 >
                   {qualification.name}
@@ -761,51 +759,15 @@ const resetCallState = useCallback(() => {
             </div>
           </div>
         )}
-      </CardContent>
-
-      <CardFooter className="flex gap-2">
-        {connectionStatus === "disconnected" && (
-          <Button onClick={startConnection} disabled={!token.trim() || isLoading} className="w-full">
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Conectando...
-              </>
-            ) : (
-              "Conectar"
-            )}
-          </Button>
-        )}
-
-        {agentStatus === "logged_in" && (
-          <Button onClick={() => makeCall()} disabled={isLoading || !phoneNumber.trim()} className="w-full">
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Discando...
-              </>
-            ) : (
-              <>
-                <Phone className="mr-2 h-4 w-4" />
-                Discar
-              </>
-            )}
-          </Button>
-        )}
 
         {showHangupButton && (
-          <Button onClick={hangupCall} disabled={isLoading} variant="destructive" className="w-full">
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Encerrando...
-              </>
-            ) : (
-              "Desligar"
-            )}
+          <Button variant="destructive" onClick={hangupCall} disabled={isLoading} className="w-full">
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Encerrar Ligação
           </Button>
         )}
-      </CardFooter>
+      </CardContent>
     </Card>
   )
 }
+

@@ -1,4 +1,5 @@
 import CallingExtensions from "@hubspot/calling-extensions-sdk"
+import { v4 as uuidv4 } from 'uuid'
 
 export interface HubspotProviderHandlers {
   dial: (phone: string) => void
@@ -11,11 +12,13 @@ export interface CallData {
   id: string
   phone: string
   telephony_id: string
+  callId?: string // Adicionado para rastrear o callId do HubSpot
   status?: 'COMPLETED' | 'FAILED' | 'BUSY' | 'NO_ANSWER' | 'CANCELED'
 }
 
 let hubspotInstance: CallingExtensions | null = null
 let currentEngagementId: string | null = null
+let currentCallId: string | null = null // Rastrear o callId atual
 
 export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
   if (typeof window === "undefined") return null
@@ -64,26 +67,27 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
 }
 
 // Notifica o HubSpot que uma chamada foi iniciada
-export function notifyOutgoingCall(phoneNumber: string, callId?: string) {
+export function notifyOutgoingCall(phoneNumber: string, callId?: string): string {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
-    return
+    return ""
   }
 
-  console.log("[HubSpot] Notifying outgoing call:", phoneNumber, "with callId:", callId)
+  // Gerar um callId único se não fornecido
+  const generatedCallId = callId || uuidv4()
+  currentCallId = generatedCallId
+
+  console.log("[HubSpot] Notifying outgoing call:", phoneNumber, "with callId:", generatedCallId)
   
   const outgoingCallData: any = {
     phoneNumber,
     callStartTime: Date.now(),
-    createEngagement: true
-  }
-
-  // Adiciona o callId se fornecido
-  if (callId) {
-    outgoingCallData.callId = callId
+    createEngagement: true,
+    callId: generatedCallId // Sempre incluir o callId
   }
 
   hubspotInstance.outgoingCall(outgoingCallData)
+  return generatedCallId
 }
 
 // Notifica o HubSpot que uma chamada foi atendida
@@ -93,8 +97,8 @@ export function notifyCallAnswered(callData: CallData) {
     return
   }
 
-  // Garantir que temos um externalCallId válido
-  const externalCallId = callData.id || callData.telephony_id
+  // Usar o callId armazenado ou gerar um novo se necessário
+  const externalCallId = callData.callId || currentCallId || callData.id || callData.telephony_id
   if (!externalCallId) {
     console.error("[HubSpot] Cannot notify call answered - no valid externalCallId")
     return
@@ -113,8 +117,8 @@ export function notifyCallEnded(callData: CallData) {
     return
   }
 
-  // Garantir que temos um externalCallId válido
-  const externalCallId = callData.id || callData.telephony_id
+  // Usar o callId armazenado ou gerar um novo se necessário
+  const externalCallId = callData.callId || currentCallId || callData.id || callData.telephony_id
   if (!externalCallId) {
     console.error("[HubSpot] Cannot notify call ended - no valid externalCallId")
     return
@@ -134,8 +138,8 @@ export function notifyCallCompleted(callData: CallData, engagementData?: any, ca
     return
   }
 
-  // Garantir que temos um externalCallId válido
-  const externalCallId = callData.id || callData.telephony_id
+  // Usar o callId armazenado ou gerar um novo se necessário
+  const externalCallId = callData.callId || currentCallId || callData.id || callData.telephony_id
   if (!externalCallId) {
     console.error("[HubSpot] Cannot notify call completed - no valid externalCallId")
     return
@@ -162,8 +166,9 @@ export function notifyCallCompleted(callData: CallData, engagementData?: any, ca
 
   hubspotInstance.callCompleted(completionData)
   
-  // Reset do engagement ID após completar
+  // Reset dos IDs após completar
   currentEngagementId = null
+  currentCallId = null
 }
 
 // Função para obter a instância do HubSpot (para uso direto se necessário)
@@ -174,5 +179,16 @@ export function getHubspotInstance() {
 // Função para obter o ID do engagement atual
 export function getCurrentEngagementId() {
   return currentEngagementId
+}
+
+// Função para obter o callId atual
+export function getCurrentCallId() {
+  return currentCallId
+}
+
+// Função para definir manualmente o callId (útil quando recebido do 3C Plus)
+export function setCurrentCallId(callId: string) {
+  currentCallId = callId
+  console.log("[HubSpot] CallId set manually:", callId)
 }
 
