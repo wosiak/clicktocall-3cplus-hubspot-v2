@@ -737,8 +737,8 @@ export default function ClickToCallSystem() {
             <h3 className="text-lg font-semibold">Ligação Ativa</h3>
             <div className="space-y-2">
               <p><strong>Número:</strong> {activeCall?.phone}</p>
-              <p><strong>ID:</strong> {activeCall?.id}</p>
-              <p><strong>Telephony ID (HubSpot External Call ID):</strong> {activeCall?.telephony_id}</p>
+              {/*<p><strong>ID:</strong> {activeCall?.id}</p>
+              <p><strong>Telephony ID (HubSpot External Call ID):</strong> {activeCall?.telephony_id}</p>*/}
               {selectedQualification && (
                 <p><strong>Qualificação:</strong> {selectedQualification.name}</p>
               )}
