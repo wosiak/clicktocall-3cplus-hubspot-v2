@@ -65,16 +65,16 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
 
 // Notifica o HubSpot que uma chamada foi iniciada
 // O externalCallId será o telephony_id do 3C Plus, que só estará disponível após a conexão da chamada
-export function notifyOutgoingCall(phoneNumber: string, externalCallId: string) {
+export function notifyOutgoingCall(number: string, externalCallId: string) {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
 
-  console.log("[HubSpot] Notifying outgoing call:", phoneNumber, "with externalCallId:", externalCallId)
+  console.log("[HubSpot] Notifying outgoing call:", number, "with externalCallId:", externalCallId)
   
   const outgoingCallData: any = {
-    phoneNumber,
+    number,
     callStartTime: Date.now(),
     createEngagement: true,
     externalCallId: externalCallId // Adiciona o externalCallId
