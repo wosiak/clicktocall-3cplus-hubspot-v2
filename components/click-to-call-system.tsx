@@ -14,11 +14,6 @@ import {
   notifyCallAnswered, 
   notifyCallEnded, 
   notifyCallCompleted,
-  notifyUserLoggedIn,
-  notifyUserAvailable,
-  notifyUserUnavailable,
-  notifyUserLoggedOut,
-  sendError,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
 
@@ -89,7 +84,7 @@ export default function ClickToCallSystem() {
     setSelectedQualification(null)
     setIsCallQualified(false)
     setCallFinished(false)
-    setCallStatus("COMPLETED")
+    setCallStatus("COMPLETED") // Reset do status da chamada
     qualificationsRef.current = []
     setPhoneNumber("")
     setIsLoading(false)
@@ -100,8 +95,6 @@ export default function ClickToCallSystem() {
     setSelectedCampaign(null)
     setAgentStatus("idle")
     resetCallState()
-    // CORREÇÃO: Notificar HubSpot que usuário fez logout
-    notifyUserLoggedOut()
   }, [resetCallState])
 
   // Watch for both conditions to be met and automatically transition to dial
@@ -144,7 +137,7 @@ export default function ClickToCallSystem() {
 
       const response = await fetch(
         `https://app.3c.plus/api/v1/groups-and-campaigns?all=true&paused=0&api_token=${tokenRef.current}`,
-       )
+      )
 
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
@@ -156,11 +149,6 @@ export default function ClickToCallSystem() {
     } catch (error) {
       console.error("❌ Error fetching campaigns:", error)
       updateStatus("Erro ao buscar campanhas. Verifique seu token.", "error")
-      // CORREÇÃO: Enviar erro para HubSpot
-      sendError({
-        message: "Erro ao buscar campanhas",
-        error: error instanceof Error ? error.message : "Unknown error"
-      })
     } finally {
       setIsLoading(false)
     }
@@ -178,7 +166,7 @@ export default function ClickToCallSystem() {
         updateStatus("Fazendo login na campanha...", "loading")
 
         const response = await fetch(
-          `https://app.3c.plus/api/v1/agent/login?api_token=${encodeURIComponent(tokenRef.current )}`,
+          `https://app.3c.plus/api/v1/agent/login?api_token=${encodeURIComponent(tokenRef.current)}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -190,18 +178,9 @@ export default function ClickToCallSystem() {
 
         setSelectedCampaign(campaign)
         setCampaigns([])
-        
-        // CORREÇÃO: Notificar HubSpot que usuário fez login
-        notifyUserLoggedIn()
-        
       } catch (error) {
         console.error("❌ Login error:", error)
         updateStatus("Erro ao fazer login. Tente novamente.", "error")
-        // CORREÇÃO: Enviar erro para HubSpot
-        sendError({
-          message: "Erro ao fazer login na campanha",
-          error: error instanceof Error ? error.message : "Unknown error"
-        })
       } finally {
         setIsLoading(false)
       }
@@ -231,9 +210,6 @@ export default function ClickToCallSystem() {
       setIsLoading(true)
       setAgentStatus("dialing")
       updateStatus("Iniciando chamada...", "loading")
-      
-      // CORREÇÃO: Notificar HubSpot que usuário está disponível antes de discar
-      notifyUserAvailable()
 
       // Criar o payload explicitamente como objeto com string
       const payload = {
@@ -244,7 +220,7 @@ export default function ClickToCallSystem() {
       console.log("[3C Plus] Payload JSON:", JSON.stringify(payload))
       
       const response = await fetch(
-        `https://app.3c.plus/api/v1/agent/manual_call/dial?api_token=${encodeURIComponent(tokenRef.current )}`,
+        `https://app.3c.plus/api/v1/agent/manual_call/dial?api_token=${encodeURIComponent(tokenRef.current)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -259,11 +235,6 @@ export default function ClickToCallSystem() {
       console.error("❌ Call error:", error)
       updateStatus("Erro ao iniciar chamada", "error")
       setAgentStatus("logged_in")
-      // CORREÇÃO: Enviar erro para HubSpot
-      sendError({
-        message: "Erro ao iniciar chamada",
-        error: error instanceof Error ? error.message : "Unknown error"
-      })
     } finally {
       setIsLoading(false)
     }
@@ -281,7 +252,7 @@ export default function ClickToCallSystem() {
         updateStatus("Qualificando chamada...", "loading")
 
         const response = await fetch(
-          `https://app.3c.plus/api/v1/agent/manual_call/${activeCall.telephony_id}/qualify?api_token=${encodeURIComponent(tokenRef.current )}`,
+          `https://app.3c.plus/api/v1/agent/manual_call/${activeCall.telephony_id}/qualify?api_token=${encodeURIComponent(tokenRef.current)}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -298,11 +269,6 @@ export default function ClickToCallSystem() {
         console.error("❌ Qualification error:", error)
         updateStatus("Erro ao qualificar chamada", "error")
         setIsLoading(false)
-        // CORREÇÃO: Enviar erro para HubSpot
-        sendError({
-          message: "Erro ao qualificar chamada",
-          error: error instanceof Error ? error.message : "Unknown error"
-        })
       }
     },
     [activeCall, updateStatus],
@@ -323,18 +289,13 @@ export default function ClickToCallSystem() {
         {
           method: "POST",
         },
-       )
+      )
 
       if (!response.ok) throw new Error(`Hangup failed: HTTP ${response.status}`)
     } catch (error) {
       console.error("❌ Hangup error:", error)
       updateStatus("Erro ao encerrar chamada", "error")
       setIsLoading(false)
-      // CORREÇÃO: Enviar erro para HubSpot
-      sendError({
-        message: "Erro ao encerrar chamada",
-        error: error instanceof Error ? error.message : "Unknown error"
-      })
     }
   }, [activeCall, updateStatus])
 
@@ -351,7 +312,7 @@ export default function ClickToCallSystem() {
         const cleanNum = String(num).trim()
         console.log("[3C Plus] fillPhoneNumber limpo:", cleanNum, typeof cleanNum)
         setPhoneNumber(cleanNum)
-        updateStatus(`Número ${cleanNum} preenchido pelo HubSpot. Clique em \"Discar\" para iniciar a chamada.`, "info")
+        updateStatus(`Número ${cleanNum} preenchido pelo HubSpot. Clique em "Discar" para iniciar a chamada.`, "info")
       },
     })
   }, [makeCall, hangupCall, qualifyCall, updateStatus])
@@ -375,8 +336,6 @@ export default function ClickToCallSystem() {
             campaign ? `Login realizado! Campanha: ${campaign.name}` : "Login realizado! Pronto para discar.",
             "success",
           )
-          // CORREÇÃO: Notificar HubSpot que usuário está disponível após login
-          notifyUserAvailable()
           break
 
         case "call-was-connected":
@@ -388,14 +347,9 @@ export default function ClickToCallSystem() {
           setActiveCall(callData)
           setAgentStatus("in_call")
 
-          // CORREÇÃO: Notifica o HubSpot que uma chamada está sendo iniciada
-          // Usar o número original do 3C Plus, mas garantir formato internacional
-          let formattedPhone = callData.phone
-          if (!formattedPhone.startsWith("+")) {
-            formattedPhone = "+55" + callData.phone
-          }
-          
-          notifyOutgoingCall(formattedPhone, callData.telephony_id)
+          // Notifica o HubSpot que uma chamada está sendo iniciada APENAS AGORA
+          // O externalCallId é o telephony_id do 3C Plus
+          notifyOutgoingCall(callData.phone, callData.telephony_id)
 
           // Reset call completion states for new call
           setIsCallQualified(false)
@@ -433,6 +387,8 @@ export default function ClickToCallSystem() {
           setIsCallQualified(true)
           setAgentStatus("call_qualified")
           setIsLoading(false) // Stop loading state
+
+          // The useEffect will handle the transition if call is also finished
           break
 
         case "call-was-finished":
@@ -451,6 +407,7 @@ export default function ClickToCallSystem() {
           }
 
           setIsLoading(false) // Stop any loading states
+          // The useEffect will handle the transition if qualification is also complete
           break
 
         case "call-was-not-answered":
@@ -485,113 +442,146 @@ export default function ClickToCallSystem() {
           setCallStatus("FAILED")
           break
 
-        case "call-was-busy":
-          updateStatus("Linha ocupada!", "info")
-          
-          // Notifica o HubSpot que a chamada foi finalizada (ocupada)
-          if (activeCall) {
-            notifyCallEnded(activeCall)
-          }
-          
-          // Definindo como call_answered para mostrar as qualificações
-          setAgentStatus("call_answered")
-          setQualifications(qualificationsRef.current)
-          setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
-          setIsCallQualified(false) // Ainda não foi qualificada
-          setCallStatus("BUSY")
-          break
-
-        case "agent-left-manual":
-          updateStatus("Saiu do modo manual", "info")
+        case "agent-login-failed":
+          setConnectionStatus("disconnected")
           setAgentStatus("idle")
+          updateStatus("Login falhou! Cheque microfone + rede, recarregue a página e tente novamente!", "error")
           resetAllState()
           break
-
+        
         case "disconnected":
           setConnectionStatus("disconnected")
-          updateStatus("Extensão desconectada", "error")
+          setAgentStatus("idle")
+          updateStatus("Desconectado do servidor", "error")
           resetAllState()
           break
 
         default:
-          console.log("📡 Unhandled socket event:", event, data)
+          console.log("🔍 Unhandled socket event:", event, data)
       }
     },
-    [
-      updateStatus,
-      fetchCampaigns,
-      campaigns,
-      selectedCampaign,
-      phoneNumber,
-      activeCall,
-      isCallQualified,
-      resetAllState,
-    ],
+    [campaigns, selectedCampaign, phoneNumber, isCallQualified, activeCall, fetchCampaigns, updateStatus, resetAllState],
   )
 
-  // Socket connection management
-  useEffect(() => {
-    if (!token) return
+  const connectSocket = useCallback(() => {
+    if (!tokenRef.current.trim()) {
+      updateStatus("Token é obrigatório", "error")
+      return
+    }
 
-    const connectSocket = () => {
-      if (socketRef.current?.connected) return
+    if (socketRef.current) {
+      socketRef.current.removeAllListeners()
+      socketRef.current.disconnect()
+    }
 
-      setConnectionStatus("connecting")
-      updateStatus("Conectando extensão...", "loading")
+    setConnectionStatus("connecting")
+    updateStatus("Conectando ao servidor...", "loading")
 
-      const socket = io("wss://app.3c.plus", {
-        auth: { token },
+    try {
+      const socket = io("https://socket.3c.plus", {
         transports: ["websocket"],
+        query: { token: tokenRef.current },
       })
 
-      socket.on("connect", () => handleSocketEvent("connected", {}))
-      socket.on("disconnect", () => handleSocketEvent("disconnected", {}))
-      socket.on("agent-entered-manual", (data) => handleSocketEvent("agent-entered-manual", data))
-      socket.on("call-was-connected", (data) => handleSocketEvent("call-was-connected", data))
-      socket.on("manual-call-was-answered", (data) => handleSocketEvent("manual-call-was-answered", data))
-      socket.on("manual-call-was-qualified", (data) => handleSocketEvent("manual-call-was-qualified", data))
-      socket.on("call-was-finished", (data) => handleSocketEvent("call-was-finished", data))
-      socket.on("call-was-not-answered", (data) => handleSocketEvent("call-was-not-answered", data))
-      socket.on("call-was-failed", (data) => handleSocketEvent("call-was-failed", data))
-      socket.on("call-was-busy", (data) => handleSocketEvent("call-was-busy", data))
-      socket.on("agent-left-manual", (data) => handleSocketEvent("agent-left-manual", data))
-
       socketRef.current = socket
+
+      socket.onAny((event, data) => {
+        handleSocketEvent(event, data)
+      })
+
+      socket.on("connect", () => {
+        handleSocketEvent("connected", {})
+      })
+
+      socket.on("disconnect", (reason) => {
+        handleSocketEvent("disconnected", { reason })
+      })
+
+      socket.on("connect_error", (error) => {
+        updateStatus("Erro ao conectar. Verifique seu token.", "error")
+        setConnectionStatus("disconnected")
+      })
+    } catch (error) {
+      updateStatus("Erro ao criar conexão", "error")
+      setConnectionStatus("disconnected")
+    }
+  }, [handleSocketEvent, updateStatus])
+
+  const openExtension = useCallback(() => {
+    if (!tokenRef.current.trim()) {
+      updateStatus("Token é obrigatório", "error")
+      return
     }
 
-    connectSocket()
+    // Verificar se já existe um iframe da extensão
+    const existingIframe = document.getElementById("3c-plus-extension-iframe")
+    if (existingIframe) {
+      console.log("📱 Iframe da extensão já existe, reutilizando...")
+      updateStatus("Extensão já carregada. Aguarde a conexão...", "info")
+      return
+    }
 
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect()
-        socketRef.current = null
+    // Criar iframe oculto para a extensão
+    const iframe = document.createElement("iframe")
+    iframe.id = "3c-plus-extension-iframe"
+    iframe.src = `https://app.3c.plus/extension?api_token=${encodeURIComponent(tokenRef.current)}`
+    iframe.setAttribute("allow", "microphone; autoplay")
+    iframe.style.display = "none" // Tornar invisível
+    iframe.style.width = "0px"
+    iframe.style.height = "0px"
+    iframe.style.border = "none"
+    iframe.style.position = "absolute"
+    iframe.style.top = "-9999px"
+    iframe.style.left = "-9999px"
+    
+    // Adicionar ao body da página
+    document.body.appendChild(iframe)
+    
+    console.log("📱 Iframe da extensão criado e adicionado à página")
+    updateStatus("Extensão carregada em segundo plano. Aguarde a conexão...", "info")
+
+    // Cleanup function para remover o iframe quando necessário
+    const cleanup = () => {
+      const iframeToRemove = document.getElementById("3c-plus-extension-iframe")
+      if (iframeToRemove) {
+        document.body.removeChild(iframeToRemove)
+        console.log("📱 Iframe da extensão removido")
       }
     }
-  }, [token, handleSocketEvent, updateStatus])
 
-  // Cleanup on unmount
+    // Armazenar a função de cleanup para uso posterior
+    ;(window as any).cleanup3CPlusExtension = cleanup
+  }, [updateStatus])
+
+  const startConnection = useCallback(() => {
+    openExtension()
+    connectSocket()
+
+    setTimeout(() => {
+      if (connectionStatusRef.current === "connected") {
+        fetchCampaigns()
+      } else {
+        updateStatus("Não foi possível conectar à extensão. Verifique o token ou tente novamente.", "error")
+      }
+    }, 3000)
+  }, [openExtension, connectSocket, fetchCampaigns, updateStatus])
+
   useEffect(() => {
     return () => {
-      // CORREÇÃO: Notificar HubSpot que usuário não está mais disponível
-      notifyUserUnavailable()
-      notifyUserLoggedOut()
+      if (socketRef.current) {
+        socketRef.current.removeAllListeners()
+        socketRef.current.disconnect()
+      }
+      
+      // Cleanup do iframe da extensão quando o componente for desmontado
+      const cleanup = (window as any).cleanup3CPlusExtension
+      if (cleanup) {
+        cleanup()
+      }
     }
   }, [])
 
-  const renderStatusIcon = () => {
-    switch (status.type) {
-      case "success":
-        return <CheckCircle className="h-4 w-4 text-green-500" />
-      case "error":
-        return <AlertCircle className="h-4 w-4 text-red-500" />
-      case "loading":
-        return <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-      default:
-        return <AlertCircle className="h-4 w-4 text-blue-500" />
-    }
-  }
-
-  const renderConnectionStatus = () => {
+  const getConnectionIcon = () => {
     switch (connectionStatus) {
       case "connected":
         return <Wifi className="h-4 w-4 text-green-500" />
@@ -602,130 +592,182 @@ export default function ClickToCallSystem() {
     }
   }
 
+  const getStatusDescription = () => {
+    if (connectionStatus === "disconnected") {
+      return ""
+    }
+    if (connectionStatus === "connecting") {
+      return "Conectando..."
+    }
+    if (connectionStatus === "connected" && campaigns.length > 0) {
+      return "Escolha uma campanha para fazer login"
+    }
+    if (agentStatus === "logged_in") {
+      return `Campanha: ${selectedCampaign?.name || "Ativa"}`
+    }
+    if (agentStatus === "dialing") {
+      return "Discando..."
+    }
+    if (agentStatus === "in_call") {
+      return "Ligação conectada - Aguardando atendimento"
+    }
+    if (agentStatus === "call_answered") {
+      if (callFinished && !isCallQualified) {
+        return "Ligação finalizada - Selecione uma qualificação"
+      }
+      return isCallQualified
+        ? "Ligação qualificada - Pode encerrar quando quiser"
+        : ""
+    }
+    if (agentStatus === "call_qualified") {
+      return `Qualificada: ${selectedQualification?.name || "Sucesso"}`
+    }
+    return "Aguardando..."
+  }
+
+  // Show qualification buttons when:
+  // 1. Call is answered AND not qualified yet
+  // 2. OR call is finished but not qualified yet
+  const showQualificationButtons =
+    activeCall !== null &&
+    !isCallQualified &&
+    qualifications.length > 0 &&
+    (agentStatus === "call_answered" || (callFinished && agentStatus === "call_answered"))
+
+  // Show hangup button when:
+  // 1. There's an active call
+  // 2. AND call is not finished yet
+  // 3. AND we're in an active call state
+  const showHangupButton =
+    activeCall !== null &&
+    !callFinished &&
+    (agentStatus === "in_call" || agentStatus === "call_answered" || agentStatus === "call_qualified")
+
+  // Show call info when there's an active call in any call-related state
+  const showCallInfo =
+    activeCall !== null &&
+    (agentStatus === "in_call" || agentStatus === "call_answered" || agentStatus === "call_qualified")
+
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
-      <div className="mx-auto max-w-md space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Phone className="h-5 w-5" />
-              Click-to-Call 3C Plus
-            </CardTitle>
-            <CardDescription className="flex items-center gap-2">
-              {renderConnectionStatus()}
-              Status: {connectionStatus}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Status Alert */}
-            <Alert>
-              <div className="flex items-center gap-2">
-                {renderStatusIcon()}
-                <AlertDescription>{status.message}</AlertDescription>
-              </div>
-            </Alert>
+    <Card className="w-full max-w-2xl mx-auto">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Phone className="h-5 w-5" />
+          3C Plus | Click-to-Call
+          {getConnectionIcon()}
+        </CardTitle>
+        <CardDescription>{getStatusDescription()}</CardDescription>
+      </CardHeader>
 
-            {/* Token Input */}
-            {agentStatus === "idle" && (
-              <div className="space-y-2">
-                <Label htmlFor="token">Token de Operador</Label>
-                <Input
-                  id="token"
-                  type="password"
-                  placeholder="Insira seu token"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  disabled={isLoading}
-                />
-              </div>
-            )}
+      <CardContent className="space-y-6">
+        {status.message && (
+          <Alert variant={status.type === "error" ? "destructive" : "default"}>
+            {status.type === "success" && <CheckCircle className="h-4 w-4" />}
+            {status.type === "error" && <AlertCircle className="h-4 w-4" />}
+            {status.type === "loading" && <Loader2 className="h-4 w-4 animate-spin" />}
+            <AlertDescription>{status.message}</AlertDescription>
+          </Alert>
+        )}
 
-            {/* Campaign Selection */}
-            {campaigns.length > 0 && (
-              <div className="space-y-2">
-                <Label>Campanhas Disponíveis</Label>
-                <div className="space-y-2">
-                  {campaigns.map((campaign) => (
-                    <Button
-                      key={campaign.id}
-                      variant="outline"
-                      className="w-full justify-start"
-                      onClick={() => loginToCampaign(campaign)}
-                      disabled={isLoading}
-                    >
-                      {campaign.name}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
+        {connectionStatus === "disconnected" && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="token">Token de Operador</Label>
+              <Input
+                id="token"
+                type="password"
+                placeholder="Insira seu token de operador"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <Button onClick={startConnection} disabled={!token.trim() || isLoading} className="w-full">
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Conectar
+            </Button>
+          </div>
+        )}
 
-            {/* Phone Number Input and Dial */}
-            {agentStatus === "logged_in" && (
-              <div className="space-y-2">
-                <Label htmlFor="phone">Número de Telefone</Label>
-                <Input
-                  id="phone"
-                  type="tel"
-                  placeholder="Ex: 11999999999"
-                  value={phoneNumber}
-                  onChange={(e) => setPhoneNumber(e.target.value)}
-                  disabled={isLoading}
-                />
+        {connectionStatus === "connected" && campaigns.length > 0 && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Campanhas Disponíveis</h3>
+            <div className="grid gap-2">
+              {campaigns.map((campaign) => (
                 <Button
-                  onClick={() => makeCall()}
-                  disabled={!phoneNumber || isLoading}
-                  className="w-full"
+                  key={campaign.id}
+                  variant="outline"
+                  onClick={() => loginToCampaign(campaign)}
+                  disabled={isLoading}
+                  className="justify-start"
                 >
-                  {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Phone className="h-4 w-4 mr-2" />}
-                  Discar
+                  {campaign.name}
                 </Button>
-              </div>
-            )}
+              ))}
+            </div>
+          </div>
+        )}
 
-            {/* Active Call Controls */}
-            {(agentStatus === "dialing" || agentStatus === "in_call") && activeCall && (
-              <div className="space-y-2">
-                <div className="text-center">
-                  <p className="font-medium">Ligação Ativa</p>
-                  <p className="text-sm text-gray-600">{activeCall.phone}</p>
-                </div>
-                {!callFinished && (
-                  <Button
-                    onClick={hangupCall}
-                    variant="destructive"
-                    className="w-full"
-                    disabled={isLoading}
-                  >
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                    Encerrar Chamada
-                  </Button>
-                )}
-              </div>
-            )}
+        {agentStatus === "logged_in" && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="phone">Digite o número desejado:</Label>
+              <Input
+                id="phone"
+                type="tel"
+                placeholder="Ex: 5511999998888"
+                value={phoneNumber}
+                onChange={(e) => setPhoneNumber(e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <Button onClick={() => makeCall()} disabled={!phoneNumber.trim() || isLoading} className="w-full">
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
+              Discar
+            </Button>
+          </div>
+        )}
 
-            {/* Qualification Selection */}
-            {(agentStatus === "call_answered" || agentStatus === "call_qualified") && qualifications.length > 0 && (
-              <div className="space-y-2">
-                <Label>Qualificação da Chamada</Label>
-                <div className="space-y-2">
-                  {qualifications.map((qualification) => (
-                    <Button
-                      key={qualification.id}
-                      variant={selectedQualification?.id === qualification.id ? "default" : "outline"}
-                      className="w-full justify-start"
-                      onClick={() => qualifyCall(qualification)}
-                      disabled={isLoading || selectedQualification?.id === qualification.id}
-                    >
-                      {qualification.name}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+        {showCallInfo && (
+          <div className="space-y-4 p-4 bg-blue-50 rounded-lg">
+            <h3 className="text-lg font-semibold">Ligação Ativa</h3>
+            <div className="space-y-2">
+              <p><strong>Número:</strong> {activeCall?.phone}</p>
+              <p><strong>ID:</strong> {activeCall?.id}</p>
+              <p><strong>Telephony ID (HubSpot External Call ID):</strong> {activeCall?.telephony_id}</p>
+              {selectedQualification && (
+                <p><strong>Qualificação:</strong> {selectedQualification.name}</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {showQualificationButtons && (
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold">Qualificar Ligação</h3>
+            <div className="grid gap-2">
+              {qualifications.map((qualification) => (
+                <Button
+                  key={qualification.id}
+                  variant={selectedQualification?.id === qualification.id ? "default" : "outline"}
+                  onClick={() => qualifyCall(qualification)}
+                  disabled={isLoading || selectedQualification?.id === qualification.id}
+                  className="justify-start"
+                >
+                  {qualification.name}
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {showHangupButton && (
+          <Button variant="destructive" onClick={hangupCall} disabled={isLoading} className="w-full">
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Encerrar Ligação
+          </Button>
+        )}
+      </CardContent>
+    </Card>
   )
 }
