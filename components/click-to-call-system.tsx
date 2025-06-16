@@ -14,6 +14,9 @@ import {
   notifyCallAnswered, 
   notifyCallEnded, 
   notifyCallCompleted,
+  notifyUserLoggedIn,
+  notifyUserLoggedOut,
+  sendError,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
 
@@ -315,6 +318,7 @@ export default function ClickToCallSystem() {
         updateStatus(`Número ${cleanNum} preenchido pelo HubSpot. Clique em "Discar" para iniciar a chamada.`, "info")
       },
     })
+    notifyUserLoggedIn()
   }, [makeCall, hangupCall, qualifyCall, updateStatus])
 
   const handleSocketEvent = useCallback(
