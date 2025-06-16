@@ -318,7 +318,6 @@ export default function ClickToCallSystem() {
         updateStatus(`Número ${cleanNum} preenchido pelo HubSpot. Clique em "Discar" para iniciar a chamada.`, "info")
       },
     })
-    notifyUserLoggedIn()
   }, [makeCall, hangupCall, qualifyCall, updateStatus])
 
   const handleSocketEvent = useCallback(
@@ -334,6 +333,7 @@ export default function ClickToCallSystem() {
 
         case "agent-entered-manual":
           setAgentStatus("logged_in")
+          notifyUserLoggedIn()
           const campaignId = data?.campaign_id
           const campaign = campaigns.find((c) => c.id === campaignId) || selectedCampaign
           updateStatus(

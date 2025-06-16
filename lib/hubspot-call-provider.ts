@@ -29,7 +29,6 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
       onReady: () => {
         console.log("[HubSpot] SDK ready -> 3C Plus")
         hubspotInstance?.initialized({})
-        hubspotInstance?.userAvailable({})
         // Notifica que o usuário está logado e disponível assim que o SDK estiver pronto
         setTimeout(() => {
           notifyUserLoggedIn()
