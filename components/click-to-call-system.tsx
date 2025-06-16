@@ -442,6 +442,13 @@ export default function ClickToCallSystem() {
           setCallStatus("FAILED")
           break
 
+        case "agent-login-failed":
+          setConnectionStatus("disconnected")
+          setAgentStatus("idle")
+          updateStatus("Login falhou! Cheque microfone + rede, recarregue a página e tente novamente!", "error")
+          resetAllState()
+          break
+        
         case "disconnected":
           setConnectionStatus("disconnected")
           setAgentStatus("idle")
