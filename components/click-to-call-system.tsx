@@ -191,6 +191,37 @@ export default function ClickToCallSystem() {
     },
     [agentStatus, updateStatus],
   )
+  
+    const logoutFromCampaign = useCallback(async () => { //Início da função de sair da Campanha
+    if (!tokenRef.current.trim()) {
+      updateStatus("Token é obrigatório", "error")
+      return
+    }
+
+    try {
+      setIsLoading(true)
+      updateStatus("Saindo da campanha...", "loading")
+
+      const response = await fetch(
+        `https://wosiak.3c.plus/api/v1/agent/logout?api_token=${encodeURIComponent(tokenRef.current)}`,
+       { method: "POST" }
+     )
+
+     if (!response.ok) throw new Error(`Logout failed: HTTP ${response.status}`)
+
+   // Notifica o HubSpot e limpa todo o estado
+      notifyUserLoggedOut()
+      resetAllState()
+      
+     updateStatus("Logout realizado com sucesso!", "success")
+     setConnectionStatus("disconnected")
+   } catch (error) {
+     console.error("❌ Logout error:", error)
+     updateStatus("Erro ao sair da campanha", "error")
+   } finally {
+     setIsLoading(false)
+   }
+ }, [updateStatus, resetAllState]) //Fim da função de sair da Campanha
 
   const makeCall = useCallback(async (number?: string) => {
     // Se number for um objeto (evento de clique), ignorar e usar phoneNumber
@@ -482,6 +513,8 @@ export default function ClickToCallSystem() {
     }
 
     setConnectionStatus("connecting")
+    console.log(`Guardando o api token`); /*teste*/ 
+    localStorage.setItem('api_token', tokenRef.current); /*teste*/
     updateStatus("Conectando ao servidor...", "loading")
 
     try {
@@ -733,6 +766,17 @@ export default function ClickToCallSystem() {
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
               Discar
             </Button>
+            <Button
+            onClick={logoutFromCampaign}
+            disabled={isLoading}
+            variant="outline"   // ou "secondary", "ghost", o que fizer sentido pra você
+            className="w-full"
+          >
+            {isLoading && (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            )}
+            Sair da Campanha
+          </Button>
           </div>
         )}
 
