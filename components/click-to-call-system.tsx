@@ -48,6 +48,7 @@ interface StatusMessage {
 export default function ClickToCallSystem() {
   const [token, setToken] = useState("")
   const [phoneNumber, setPhoneNumber] = useState("")
+  const [callSid, setCallSid] = useState<string>(''); /* Adicionado agora para guardar o Protocolo da Chamada*/
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected")
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle")
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
@@ -347,7 +348,9 @@ export default function ClickToCallSystem() {
             id: data?.call?.id || "",
             phone: data?.call?.phone || phoneNumber,
             telephony_id: data?.call?.telephony_id || "",
+            setCallSid: data?.call?.sid,
           }
+          
           setActiveCall(callData)
           setAgentStatus("in_call")
 
@@ -690,6 +693,7 @@ export default function ClickToCallSystem() {
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Conectar
             </Button>
+            
           </div>
         )}
 
@@ -737,6 +741,7 @@ export default function ClickToCallSystem() {
             <h3 className="text-lg font-semibold">Ligação Ativa</h3>
             <div className="space-y-2">
               <p><strong>Número:</strong> {activeCall?.phone}</p>
+              <p><strong>Protocolo:</strong> p-{activeCall?.setCallSid}</p>
               {/*<p><strong>ID:</strong> {activeCall?.id}</p>
               <p><strong>Telephony ID (HubSpot External Call ID):</strong> {activeCall?.telephony_id}</p>*/}
               {selectedQualification && (
