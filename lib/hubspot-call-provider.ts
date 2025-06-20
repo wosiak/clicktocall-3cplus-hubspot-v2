@@ -18,6 +18,7 @@ let hubspotInstance: CallingExtensions | null = null
 let currentEngagementId: string | null = null
 let isUserLoggedIn: boolean = false
 let isUserAvailable: boolean = false
+let isInitialized: boolean = false
 
 export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
   if (typeof window === "undefined") return null
@@ -28,11 +29,20 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
     eventHandlers: {
       onReady: () => {
         console.log("[HubSpot] SDK ready -> 3C Plus")
-        hubspotInstance?.initialized({})
-        // Notifica que o usuário está logado e disponível assim que o SDK estiver pronto
+        
+        // Aguarda um pouco antes de marcar como inicializado para garantir que o SDK esteja completamente pronto
         setTimeout(() => {
-          notifyUserLoggedIn()
-          notifyUserAvailable()
+          if (hubspotInstance) {
+            hubspotInstance.initialized({})
+            isInitialized = true
+            console.log("[HubSpot] SDK initialized successfully")
+            
+            // Notifica que o usuário está logado e disponível após a inicialização
+            setTimeout(() => {
+              notifyUserLoggedIn()
+              notifyUserAvailable()
+            }, 200)
+          }
         }, 100)
       },
       onDialNumber: (payload: any) => {
@@ -40,13 +50,6 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
         if (number) {
           console.log("[HubSpot] Dial number requested:", number)
           
-          // Garante que o número para o HubSpot tenha o '+'
-          let formattedNumberForHubspot = number
-          if (!formattedNumberForHubspot.startsWith('+')) {
-            formattedNumberForHubspot = '+' + formattedNumberForHubspot // Assumindo +55 para números brasileiros
-          }
-          console.log("[HubSpot] Formatted number for HubSpot:", formattedNumberForHubspot)
-
           // Para o 3C Plus, o número deve ser sem o '+'
           const cleanNumberFor3C = number.startsWith('+') ? number.substring(1) : number
           console.log("[HubSpot] Clean number for 3C Plus:", cleanNumberFor3C)
@@ -105,76 +108,126 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
   return hubspotInstance
 }
 
-// NOVA FUNÇÃO: Notifica que o usuário fez login
-export function notifyUserLoggedIn() {
+// Função para aguardar a inicialização do SDK
+function waitForInitialization(): Promise<void> {
+  return new Promise((resolve) => {
+    if (isInitialized) {
+      resolve()
+      return
+    }
+    
+    const checkInterval = setInterval(() => {
+      if (isInitialized) {
+        clearInterval(checkInterval)
+        resolve()
+      }
+    }, 50)
+    
+    // Timeout após 5 segundos
+    setTimeout(() => {
+      clearInterval(checkInterval)
+      console.warn("[HubSpot] Initialization timeout - proceeding anyway")
+      resolve()
+    }, 5000)
+  })
+}
+
+// Notifica que o usuário fez login
+export async function notifyUserLoggedIn() {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
+
+  await waitForInitialization()
 
   if (!isUserLoggedIn) {
     console.log("[HubSpot] Notifying user logged in")
-    hubspotInstance.userLoggedIn()
-    isUserLoggedIn = true
+    try {
+      hubspotInstance.userLoggedIn()
+      isUserLoggedIn = true
+    } catch (error) {
+      console.error("[HubSpot] Error notifying user logged in:", error)
+    }
   }
 }
 
-// NOVA FUNÇÃO: Notifica que o usuário está disponível
-export function notifyUserAvailable() {
+// Notifica que o usuário está disponível
+export async function notifyUserAvailable() {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
+
+  await waitForInitialization()
 
   if (!isUserAvailable) {
     console.log("[HubSpot] Notifying user available")
-    hubspotInstance.userAvailable()
-    isUserAvailable = true
+    try {
+      hubspotInstance.userAvailable()
+      isUserAvailable = true
+    } catch (error) {
+      console.error("[HubSpot] Error notifying user available:", error)
+    }
   }
 }
 
-// NOVA FUNÇÃO: Notifica que o usuário não está disponível
-export function notifyUserUnavailable() {
+// Notifica que o usuário não está disponível
+export async function notifyUserUnavailable() {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
+
+  await waitForInitialization()
 
   if (isUserAvailable) {
     console.log("[HubSpot] Notifying user unavailable")
-    hubspotInstance.userUnavailable()
-    isUserAvailable = false
+    try {
+      hubspotInstance.userUnavailable()
+      isUserAvailable = false
+    } catch (error) {
+      console.error("[HubSpot] Error notifying user unavailable:", error)
+    }
   }
 }
 
-// NOVA FUNÇÃO: Notifica que o usuário fez logout
-export function notifyUserLoggedOut() {
+// Notifica que o usuário fez logout
+export async function notifyUserLoggedOut() {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
 
+  await waitForInitialization()
+
   if (isUserLoggedIn) {
     console.log("[HubSpot] Notifying user logged out")
-    hubspotInstance.userLoggedOut()
-    isUserLoggedIn = false
-    isUserAvailable = false
+    try {
+      hubspotInstance.userLoggedOut()
+      isUserLoggedIn = false
+      isUserAvailable = false
+    } catch (error) {
+      console.error("[HubSpot] Error notifying user logged out:", error)
+    }
   }
 }
 
 // Notifica o HubSpot que uma chamada foi iniciada
-export function notifyOutgoingCall(phoneNumber: string, externalCallId: string) {
+export async function notifyOutgoingCall(phoneNumber: string, externalCallId: string) {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
 
+  await waitForInitialization()
+
   // Garante que o usuário está logado e disponível antes de iniciar chamada
   if (!isUserLoggedIn) {
-    notifyUserLoggedIn()
+    await notifyUserLoggedIn()
   }
   if (!isUserAvailable) {
-    notifyUserAvailable()
+    await notifyUserAvailable()
   }
 
   console.log("[HubSpot] Notifying outgoing call:", phoneNumber, "with externalCallId:", externalCallId)
@@ -182,26 +235,37 @@ export function notifyOutgoingCall(phoneNumber: string, externalCallId: string) 
   // Garante que o número para o HubSpot tenha o '+'
   let formattedPhoneNumberForHubspot = phoneNumber
   if (!formattedPhoneNumberForHubspot.startsWith('+')) {
-    formattedPhoneNumberForHubspot = '+' + formattedPhoneNumberForHubspot // Assumindo +55 para números brasileiros
+    formattedPhoneNumberForHubspot = '+' + formattedPhoneNumberForHubspot
   }
   
   const outgoingCallData: any = {
-    phoneNumber: formattedPhoneNumberForHubspot, // Usar o número formatado para HubSpot
+    phoneNumber: formattedPhoneNumberForHubspot,
     callStartTime: Date.now(),
     createEngagement: true,
     externalCallId: externalCallId
   }
 
   console.log("[HubSpot] Outgoing call data:", outgoingCallData)
-  hubspotInstance.outgoingCall(outgoingCallData)
+  
+  try {
+    hubspotInstance.outgoingCall(outgoingCallData)
+  } catch (error) {
+    console.error("[HubSpot] Error notifying outgoing call:", error)
+    sendError({
+      message: "Error notifying outgoing call",
+      error: error instanceof Error ? error.message : "Unknown error"
+    })
+  }
 }
 
 // Notifica o HubSpot que uma chamada foi atendida
-export function notifyCallAnswered(callData: CallData) {
+export async function notifyCallAnswered(callData: CallData) {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
+
+  await waitForInitialization()
 
   const externalCallId = callData.telephony_id
   if (!externalCallId) {
@@ -216,15 +280,26 @@ export function notifyCallAnswered(callData: CallData) {
   }
   
   console.log("[HubSpot] Call answered data:", callAnsweredData)
-  hubspotInstance.callAnswered(callAnsweredData)
+  
+  try {
+    hubspotInstance.callAnswered(callAnsweredData)
+  } catch (error) {
+    console.error("[HubSpot] Error notifying call answered:", error)
+    sendError({
+      message: "Error notifying call answered",
+      error: error instanceof Error ? error.message : "Unknown error"
+    })
+  }
 }
 
 // Notifica o HubSpot que uma chamada foi finalizada
-export function notifyCallEnded(callData: CallData) {
+export async function notifyCallEnded(callData: CallData) {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
+
+  await waitForInitialization()
 
   const externalCallId = callData.telephony_id
   if (!externalCallId) {
@@ -240,15 +315,26 @@ export function notifyCallEnded(callData: CallData) {
   }
   
   console.log("[HubSpot] Call ended data:", callEndedData)
-  hubspotInstance.callEnded(callEndedData)
+  
+  try {
+    hubspotInstance.callEnded(callEndedData)
+  } catch (error) {
+    console.error("[HubSpot] Error notifying call ended:", error)
+    sendError({
+      message: "Error notifying call ended",
+      error: error instanceof Error ? error.message : "Unknown error"
+    })
+  }
 }
 
 // Notifica o HubSpot que o processo de chamada foi completado
-export function notifyCallCompleted(callData: CallData, engagementData?: any, callStatus: string = 'COMPLETED') {
+export async function notifyCallCompleted(callData: CallData, engagementData?: any, callStatus: string = 'COMPLETED') {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
+
+  await waitForInitialization()
 
   const externalCallId = callData.telephony_id
   if (!externalCallId) {
@@ -282,32 +368,55 @@ export function notifyCallCompleted(callData: CallData, engagementData?: any, ca
   }
 
   console.log("[HubSpot] Call completed data:", completionData)
-  hubspotInstance.callCompleted(completionData)
+  
+  try {
+    hubspotInstance.callCompleted(completionData)
+  } catch (error) {
+    console.error("[HubSpot] Error notifying call completed:", error)
+    sendError({
+      message: "Error notifying call completed",
+      error: error instanceof Error ? error.message : "Unknown error"
+    })
+  }
   
   // Reset do engagement ID após completar
   currentEngagementId = null
 }
 
-// NOVA FUNÇÃO: Enviar erro para o HubSpot
-export function sendError(errorData: any) {
+// Enviar erro para o HubSpot
+export async function sendError(errorData: any) {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
+
+  await waitForInitialization()
 
   console.log("[HubSpot] Sending error:", errorData)
-  hubspotInstance.sendError(errorData)
+  
+  try {
+    hubspotInstance.sendError(errorData)
+  } catch (error) {
+    console.error("[HubSpot] Error sending error to HubSpot:", error)
+  }
 }
 
-// NOVA FUNÇÃO: Redimensionar widget
-export function resizeWidget(dimensions: { width: number; height: number }) {
+// Redimensionar widget
+export async function resizeWidget(dimensions: { width: number; height: number }) {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
     return
   }
 
+  await waitForInitialization()
+
   console.log("[HubSpot] Resizing widget:", dimensions)
-  hubspotInstance.resizeWidget(dimensions)
+  
+  try {
+    hubspotInstance.resizeWidget(dimensions)
+  } catch (error) {
+    console.error("[HubSpot] Error resizing widget:", error)
+  }
 }
 
 // Função para obter a instância do HubSpot (para uso direto se necessário)
@@ -320,11 +429,11 @@ export function getCurrentEngagementId() {
   return currentEngagementId
 }
 
-// NOVA FUNÇÃO: Obter status do usuário
+// Obter status do usuário
 export function getUserStatus() {
   return {
     isLoggedIn: isUserLoggedIn,
-    isAvailable: isUserAvailable
+    isAvailable: isUserAvailable,
+    isInitialized: isInitialized
   }
 }
-
