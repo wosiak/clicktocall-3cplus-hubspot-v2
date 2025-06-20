@@ -568,9 +568,10 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
   }
   
   const outgoingCallData: any = {
-    phoneNumber: formattedPhoneNumberForHubspot,
+    toNumber: formattedPhoneNumberForHubspot, //antes era phoneNumber
     callStartTime: Date.now(),
     createEngagement: true,
+    fromNumber: "+5542999998888", // adicionado por mim
     externalCallId: externalCallId
   }
 
