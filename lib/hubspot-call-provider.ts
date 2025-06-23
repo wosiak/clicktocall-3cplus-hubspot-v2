@@ -363,8 +363,8 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
     engagementId: currentEngagementId,
     externalCallId: callData.telephony_id,
     engagementProperties: {
-      hs_call_status: callStatus,
-      /* removing: hs_call_end_time: Date.now()*/
+      hs_call_status: callStatus/*,
+       removing: hs_call_end_time: Date.now()*/
     }
   }
 
