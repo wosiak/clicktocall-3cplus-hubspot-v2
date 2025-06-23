@@ -18,7 +18,9 @@ let hubspotInstance: CallingExtensions | null = null
 let currentEngagementId: string | null = null
 let isUserLoggedIn: boolean = false
 let isUserAvailable: boolean = false
-let isInitialized: boolean = false
+
+let hubspotCallId: string | null = null;
+let isInitialized: boolean = false;
 
 export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
   if (typeof window === "undefined") return null
@@ -81,14 +83,11 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
           error: JSON.stringify(data)
         })
       },
-      onInitiateCallIdSucceeded: (data: any) => { //duplicated
-        let currentCallIdHubspot = data?.callId;
-        console.log("[HubSpot] Recebendo o call id:", currentCallIdHubspot)
+      onInitiateCallIdSucceeded: (data: any) => {
+        hubspotCallId = data?.callId;
+        console.log("[HubSpot] Recebendo o call id:", hubspotCallId)
         console.log("Recebendo data completo do callidSucceeded:", data)
-        sendError({
-          message: "erro ao receber o initiatedCallIdSucceeded",
-          error: JSON.stringify(data)
-        })
+        // Não enviar erro aqui, pois é um evento de sucesso
       },
       onPublishToChannelFailed: (data: any) => {
         console.error("[HubSpot] Failed to publish to channel:", data)
@@ -361,11 +360,12 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   }
   
   const completionData: any = {
-    engagementId: currentEngagementId, // added now, passing currentEngagementId to Hubspot
-    /*hideWidget: 0, // added now. but not in production yet. optional param */
-    externalCallId: externalCallId,
-    /*callEndTime: Date.now(), remove now*/
-    hsCallStatus: "COMPLETED" // before was hsCallStatus: callStatus, now it's a 'COMPLETED' string.
+    engagementId: currentEngagementId,
+    externalCallId: callData.telephony_id,
+    engagementProperties: {
+      hs_call_status: callStatus,
+      hs_call_end_time: Date.now()
+    }
   }
 
   // Se temos dados de engagement, incluímos
@@ -391,8 +391,9 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
     })
   }
   
-  // Reset do engagement ID após completar
+  // Reset do engagement ID e do hubspotCallId após completar
   currentEngagementId = null
+  hubspotCallId = null
 }
 
 // Enviar erro para o HubSpot
