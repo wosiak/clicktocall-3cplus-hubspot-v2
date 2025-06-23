@@ -81,6 +81,15 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
           error: JSON.stringify(data)
         })
       },
+      onInitiateCallIdSucceeded: (data: any) => { //duplicated
+        let currentCallIdHubspot = data?.callId;
+        console.log("[HubSpot] Recebendo o call id:", currentCallIdHubspot)
+        console.log("Recebendo data completo do callidSucceeded:", data)
+        sendError({
+          message: "erro ao receber o initiatedCallIdSucceeded",
+          error: JSON.stringify(data)
+        })
+      },
       onPublishToChannelFailed: (data: any) => {
         console.error("[HubSpot] Failed to publish to channel:", data)
         sendError({
@@ -240,7 +249,7 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
   
   const outgoingCallData: any = {
     toNumber: formattedPhoneNumberForHubspot, //antes era phoneNumber
-    callStartTime: Date.now(),
+    //callStartTime: Date.now(), removed now. optional
     createEngagement: true,
     fromNumber: "+5542999998888", // adicionado por mim
     externalCallId: externalCallId
