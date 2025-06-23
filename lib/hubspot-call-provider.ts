@@ -352,9 +352,11 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   }
   
   const completionData: any = {
+    engagementId: currentEngagementId, // added now, passing currentEngagementId to Hubspot
+    /*hideWidget: 0, // added now. but not in production yet. optional param */
     externalCallId: externalCallId,
-    callEndTime: Date.now(),
-    hsCallStatus: "COMPLETED"
+    /*callEndTime: Date.now(), remove now*/
+    hsCallStatus: "COMPLETED" // before was hsCallStatus: callStatus, now it's a 'COMPLETED' string.
   }
 
   // Se temos dados de engagement, incluímos
@@ -371,7 +373,7 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   console.log("[HubSpot] Call completed data:", completionData)
   
   try {
-    hubspotInstance.callCompleted(completionData)
+    hubspotInstance.callCompleted(completionData) // send callCompleted to Hubspot
   } catch (error) {
     console.error("[HubSpot] Error notifying call completed:", error)
     sendError({
