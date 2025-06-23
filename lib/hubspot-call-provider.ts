@@ -84,7 +84,6 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
       onInitiateCallIdSucceeded: (data: any) => { //duplicated
         let currentCallIdHubspot = data?.callId;
         console.log("[HubSpot] Recebendo o call id:", currentCallIdHubspot)
-        console.log("Recebendo data completo do callidSucceeded:", data)
         sendError({
           message: "erro ao receber o initiatedCallIdSucceeded",
           error: JSON.stringify(data)
@@ -363,7 +362,7 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   const completionData: any = {
     engagementId: currentEngagementId, // added now, passing currentEngagementId to Hubspot
     /*hideWidget: 0, // added now. but not in production yet. optional param */
-    externalCallId: externalCallId,
+    externalCallId: currentCallIdHubspot, // before: externalCallId | now: currentCallIdHubspot
     /*callEndTime: Date.now(), remove now*/
     hsCallStatus: "COMPLETED" // before was hsCallStatus: callStatus, now it's a 'COMPLETED' string.
   }
