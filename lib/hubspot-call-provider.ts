@@ -253,7 +253,7 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
     createEngagement: true,
     fromNumber: "+5542999998888", // adicionado por mim
     externalCallId: externalCallId,
-    dialingContext: onDialEventPayload // added now
+    /*dialingContext: onDialEventPayload added n removed now*/
   }
 
   console.log("[HubSpot] Outgoing call data:", outgoingCallData)
