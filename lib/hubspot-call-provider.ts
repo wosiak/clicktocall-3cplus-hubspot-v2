@@ -1,4 +1,5 @@
 import CallingExtensions from "@hubspot/calling-extensions-sdk"
+import { callEndStatus } from "@hubspot/calling-extensions-sdk/dist/types/src/Constants"
 
 export interface HubspotProviderHandlers {
   dial: (phone: string) => void
@@ -248,10 +249,11 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
   
   const outgoingCallData: any = {
     toNumber: formattedPhoneNumberForHubspot, //antes era phoneNumber
-    //callStartTime: Date.now(), removed now. optional
+    callStartTime: Date.now(), // ADD now. optional
     createEngagement: true,
     fromNumber: "+5542999998888", // adicionado por mim
-    externalCallId: externalCallId
+    externalCallId: externalCallId,
+    dialingContext: onDialEventPayload // added now
   }
 
   console.log("[HubSpot] Outgoing call data:", outgoingCallData)
@@ -320,7 +322,9 @@ export async function notifyCallEnded(callData: CallData) {
   
   const callEndedData = {
     externalCallId: externalCallId,
-    callEndTime: Date.now()
+    engagementId: currentEngagementId, //added now
+    /*callEndTime: Date.now() removed now */
+    callEndStatus: "COMPLETED" // added now
   }
   
   console.log("[HubSpot] Call ended data:", callEndedData)
