@@ -251,8 +251,8 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
     toNumber: formattedPhoneNumberForHubspot, //antes era phoneNumber
     callStartTime: Date.now(), // ADD now. optional
     createEngagement: true,
-    fromNumber: "+5542999998888"//,  adicionado por mim
-    /* externalCallId: externalCallId, removed now, not necessary*/
+    fromNumber: "+5542999998888",//,  adicionado por mim
+     externalCallId: externalCallId /*removed now, not necessary*/
     /*dialingContext: onDialEventPayload added n removed now*/
   }
 
