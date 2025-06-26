@@ -251,8 +251,8 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
     toNumber: formattedPhoneNumberForHubspot, //antes era phoneNumber
     callStartTime: Date.now(), // ADD now. optional
     createEngagement: true,
-    fromNumber: "+5542999998888", // adicionado por mim
-    externalCallId: externalCallId,
+    fromNumber: "+5542999998888"//,  adicionado por mim
+    /* externalCallId: externalCallId, removed now, not necessary*/
     /*dialingContext: onDialEventPayload added n removed now*/
   }
 
@@ -366,9 +366,12 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   const completionData: any = {
     engagementId: currentEngagementId,
     externalCallId: callData.telephony_id,
+    hideWidget: false, //added now
     engagementProperties: {
-      hs_call_status: callStatus/*,
-       removing: hs_call_end_time: Date.now()*/
+      hs_call_status: callStatus,
+      hs_timestamp: Date.now(),
+      hs_call_title: "Título da Ligação" // added now 
+      /*removing: hs_call_end_time: Date.now()*/
     }
   }
 
