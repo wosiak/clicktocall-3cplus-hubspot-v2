@@ -16,6 +16,7 @@ import {
   notifyCallCompleted,
   notifyUserLoggedIn,
   notifyUserLoggedOut,
+  notifyUserAvailable,
   sendError,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
@@ -360,6 +361,7 @@ export default function ClickToCallSystem() {
         case "connected":
           setConnectionStatus("connected")
           updateStatus("Extensão conectada! Buscando campanhas...", "success")
+          notifyUserAvailable()
           fetchCampaigns()
           break
 
@@ -804,7 +806,7 @@ export default function ClickToCallSystem() {
                   key={qualification.id}
                   variant={selectedQualification?.id === qualification.id ? "default" : "outline"}
                   onClick={() => qualifyCall(qualification)}
-                  disabled={isLoading || selectedQualification?.id === qualification.id}
+                  /*disabled={isLoading || selectedQualification?.id === qualification.id}*/
                   className="justify-start"
                 >
                   {qualification.name}
