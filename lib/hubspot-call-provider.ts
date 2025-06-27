@@ -50,6 +50,12 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
       },
       onDialNumber: (payload: any) => {
         const number = payload?.toNumber || payload?.phoneNumber || payload?.number
+        const objectId = payload?.objectId
+        const objectTypeId = payload.objectTypeId
+
+        console.log(objectId)
+        console.log(objectTypeId)
+        
         if (number) {
           console.log("[HubSpot] Dial number requested:", number)
           
