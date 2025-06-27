@@ -1,6 +1,5 @@
 import CallingExtensions from "@hubspot/calling-extensions-sdk"
-import { callEndStatus } from "@hubspot/calling-extensions-sdk/dist/types/src/Constants" // test
-import { useState, useRef, useEffect, useCallback } from "react" // added now
+import { callEndStatus } from "@hubspot/calling-extensions-sdk/dist/types/src/Constants"
 
 export interface HubspotProviderHandlers {
   dial: (phone: string) => void
@@ -20,9 +19,9 @@ let hubspotInstance: CallingExtensions | null = null
 let currentEngagementId: string | null = null
 let isUserLoggedIn: boolean = false
 let isUserAvailable: boolean = false
-let dialingContext: any = null // added now
-let hubspotCallId: string | null = null;
-let isInitialized: boolean = false;
+let dialingContext: any = null // Armazena o payload completo do onDialNumber
+let hubspotCallId: string | null = null
+let isInitialized: boolean = false
 
 export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
   if (typeof window === "undefined") return null
@@ -50,11 +49,16 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
         }, 100)
       },
       onDialNumber: (payload: any) => {
-        dialingContext = payload // added now
-        const number = payload?.toNumber || payload?.phoneNumber || payload?.number
+        // CORREÇÃO: Armazenar o payload completo do onDialNumber para usar no dialingContext
+        dialingContext = payload
+        
+        console.log("[HubSpot] onDialNumber payload completo:", payload)
+        console.log("[HubSpot] Armazenando dialingContext:", dialingContext)
+        
+        const number = payload?.toNumber || payload?.phoneNumber || payload?.phone_number || payload?.number
         const objectId = payload?.objectId
-        const objectTypeId = payload.objectTypeId
-        console.log(`Objeto inteiro recebido: ${dialingContextRef.current}`) // added now
+        const objectTypeId = payload?.objectTypeId
+        
         console.log(`ObjectId recebido no DialNumber: ${objectId}`)
         console.log(`ObjectTypeId recebido no DialNumber: ${objectTypeId}`)
 
@@ -93,10 +97,9 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
         })
       },
       onInitiateCallIdSucceeded: (data: any) => {
-        hubspotCallId = data?.callId;
+        hubspotCallId = data?.callId
         console.log("[HubSpot] Recebendo o call id:", hubspotCallId)
         console.log("Recebendo data completo do callidSucceeded:", data)
-        // Não enviar erro aqui, pois é um evento de sucesso
       },
       onPublishToChannelFailed: (data: any) => {
         console.error("[HubSpot] Failed to publish to channel:", data)
@@ -224,6 +227,9 @@ export async function notifyUserLoggedOut() {
       hubspotInstance.userLoggedOut()
       isUserLoggedIn = false
       isUserAvailable = false
+      
+      // Reset do dialingContext quando o usuário faz logout
+      dialingContext = null
     } catch (error) {
       console.error("[HubSpot] Error notifying user logged out:", error)
     }
@@ -248,21 +254,22 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
   }
 
   console.log("[HubSpot] Notifying outgoing call:", phoneNumber, "with externalCallId:", externalCallId)
+  console.log("[HubSpot] Using dialingContext:", dialingContext)
   
   // Garante que o número para o HubSpot tenha o '+'
   let formattedPhoneNumberForHubspot = phoneNumber
   if (!formattedPhoneNumberForHubspot.startsWith('+')) {
     formattedPhoneNumberForHubspot = '+' + formattedPhoneNumberForHubspot
   }
-  const payload = dialingContextRef.current
 
+  // CORREÇÃO: Usar dialingContext diretamente (não dialingContextRef.current)
   const outgoingCallData: any = {
-    toNumber: formattedPhoneNumberForHubspot, //antes era phoneNumber
-    callStartTime: Date.now(), // ADD now. optional
+    toNumber: formattedPhoneNumberForHubspot,
+    callStartTime: Date.now(),
     createEngagement: true,
-    fromNumber: "+5542999998888",//,  adicionado por mim
+    fromNumber: "+5542999998888",
     externalCallId: externalCallId,
-    dialingContext: payload
+    dialingContext: dialingContext // CORREÇÃO: Usar a variável dialingContext diretamente
   }
 
   console.log("[HubSpot] Outgoing call data:", outgoingCallData)
@@ -331,9 +338,8 @@ export async function notifyCallEnded(callData: CallData) {
   
   const callEndedData = {
     externalCallId: externalCallId,
-    engagementId: currentEngagementId, //added now
-    /*callEndTime: Date.now() removed now */
-    callEndStatus: "COMPLETED" // added now
+    engagementId: currentEngagementId,
+    callEndStatus: "COMPLETED"
   }
   
   console.log("[HubSpot] Call ended data:", callEndedData)
@@ -375,12 +381,11 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   const completionData: any = {
     engagementId: currentEngagementId,
     externalCallId: callData.telephony_id,
-    hideWidget: false, //added now
+    hideWidget: false,
     engagementProperties: {
       hs_call_status: callStatus,
       hs_timestamp: Date.now(),
-      hs_call_title: "Título da Ligação" // added now 
-      /*removing: hs_call_end_time: Date.now()*/
+      hs_call_title: `Chamada - ${formattedPhoneNumberForHubspot}`
     }
   }
 
@@ -395,10 +400,18 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
     }
   }
 
+  // Valores padrão se não fornecidos
+  if (!completionData.body) {
+    completionData.body = `Chamada para ${formattedPhoneNumberForHubspot}`
+  }
+  if (!completionData.subject) {
+    completionData.subject = `Chamada - ${formattedPhoneNumberForHubspot}`
+  }
+
   console.log("[HubSpot] Call completed data:", completionData)
   
   try {
-    hubspotInstance.callCompleted(completionData) // send callCompleted to Hubspot
+    hubspotInstance.callCompleted(completionData)
   } catch (error) {
     console.error("[HubSpot] Error notifying call completed:", error)
     sendError({
@@ -456,6 +469,11 @@ export function getHubspotInstance() {
 // Função para obter o ID do engagement atual
 export function getCurrentEngagementId() {
   return currentEngagementId
+}
+
+// Função para obter o dialingContext atual
+export function getDialingContext() {
+  return dialingContext
 }
 
 // Obter status do usuário
