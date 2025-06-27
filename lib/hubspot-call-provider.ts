@@ -1,5 +1,6 @@
 import CallingExtensions from "@hubspot/calling-extensions-sdk"
 import { callEndStatus } from "@hubspot/calling-extensions-sdk/dist/types/src/Constants" // test
+import { useState, useRef, useEffect, useCallback } from "react" // added now
 
 export interface HubspotProviderHandlers {
   dial: (phone: string) => void
@@ -19,7 +20,7 @@ let hubspotInstance: CallingExtensions | null = null
 let currentEngagementId: string | null = null
 let isUserLoggedIn: boolean = false
 let isUserAvailable: boolean = false
-
+let dialingContext: any = null // added now
 let hubspotCallId: string | null = null;
 let isInitialized: boolean = false;
 
@@ -49,13 +50,14 @@ export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
         }, 100)
       },
       onDialNumber: (payload: any) => {
+        dialingContext = payload // added now
         const number = payload?.toNumber || payload?.phoneNumber || payload?.number
         const objectId = payload?.objectId
         const objectTypeId = payload.objectTypeId
+        console.log(`Objeto inteiro recebido: ${dialingContextRef.current}`) // added now
+        console.log(`ObjectId recebido no DialNumber: ${objectId}`)
+        console.log(`ObjectTypeId recebido no DialNumber: ${objectTypeId}`)
 
-        console.log(objectId)
-        console.log(objectTypeId)
-        
         if (number) {
           console.log("[HubSpot] Dial number requested:", number)
           
@@ -252,14 +254,15 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
   if (!formattedPhoneNumberForHubspot.startsWith('+')) {
     formattedPhoneNumberForHubspot = '+' + formattedPhoneNumberForHubspot
   }
-  
+  const payload = dialingContextRef.current
+
   const outgoingCallData: any = {
     toNumber: formattedPhoneNumberForHubspot, //antes era phoneNumber
     callStartTime: Date.now(), // ADD now. optional
     createEngagement: true,
     fromNumber: "+5542999998888",//,  adicionado por mim
-     externalCallId: externalCallId /*removed now, not necessary*/
-    /*dialingContext: onDialEventPayload added n removed now*/
+    externalCallId: externalCallId,
+    dialingContext: payload
   }
 
   console.log("[HubSpot] Outgoing call data:", outgoingCallData)
