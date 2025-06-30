@@ -380,7 +380,7 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   }
   
   // Construir o hs_call_body
-  let callBody = `<p><strong><span style="color: #0C5394;"><span style="font-size: 12pt;">Número: ${callData.phone}</span></span></strong></p>\n <p><p><strong><span style="color: #0C5394;"><span style="font-size: 12pt;">Status da Chamada: ${callStatus}</span></span></strong></p></p>`
+  let callBody = `<p><strong><span style="color: #0C5394;"><span style="font-size: 12pt;">Número:</span></span></strong> ${callData.phone}</p>\n <p><strong><span style="color: #0C5394;"><span style="font-size: 12pt;">Status:</span></span></strong> ${callStatus}</p>`
   if (callData.recordingLink) {
     callBody += `\n<p>Link da Gravação: ${callData.recordingLink}</p>`
   }
