@@ -385,9 +385,9 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
     engagementProperties: {
       hs_call_status: callStatus,
       hs_timestamp: Date.now(),
-      hs_call_title: `Chamada - ${formattedPhoneNumberForHubspot}`,
-      hs_call_direction: `OUTBOUND`,
-      hs_call_body: "Descrição da Chamada deve vir aqui"
+      hs_call_title: `Título da Chamada - ${formattedPhoneNumberForHubspot}`,
+      hs_call_direction: `OUTBOUND`, // added now
+      hs_call_body: `Número: ${callData.phone} \n Status da Chamada: ${callStatus}` // added now
     }
   }
 
