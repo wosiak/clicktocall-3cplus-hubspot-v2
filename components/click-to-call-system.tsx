@@ -106,29 +106,30 @@ export default function ClickToCallSystem() {
 
   // Watch for both conditions to be met and automatically transition to dial
   useEffect(() => {
-    const finalizeCall = async () => {
-      if (activeCall && isCallQualified && callFinished && activeCall.recordingLink && activeCall.qualificationName) {
-        console.log("✅ Finalizando chamada e notificando HubSpot...")
+    if (isCallQualified && callFinished && activeCall) {
+      console.log("✅ Both qualification and call finished - transitioning to dial")
 
-        const engagementData = selectedQualification ? {
-          notes: `Chamada qualificada como: ${selectedQualification.name}`,
-          subject: `Chamada - ${activeCall.phone}`,
-          qualification: selectedQualification
-        } : undefined
-        
-        notifyCallCompleted(activeCall, engagementData, callStatus)
+      // Notifica o HubSpot que a chamada foi completada
+      const engagementData = selectedQualification ? {
+        notes: `Chamada qualificada como: ${selectedQualification.name}`,
+        subject: `Chamada - ${activeCall.phone}`,
+        qualification: selectedQualification
+      } : undefined
+      
+      notifyCallCompleted(activeCall, engagementData, callStatus)
 
-        updateStatus(`Ligação finalizada: ${activeCall.phone}. Pronto para nova ligação.`, "success")
-        setAgentStatus("logged_in")
+      // Show completion message
+      updateStatus(`Ligação finalizada: ${activeCall.phone}. Pronto para nova ligação.`, "success")
 
-        setTimeout(() => {
-          resetCallState()
-          updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
-        }, 1500)
-      }
+      // Reset to logged_in state (dial screen)
+      setAgentStatus("logged_in")
+
+      // Reset call state after a brief delay to show the completion message
+      setTimeout(() => {
+        resetCallState()
+        updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
+      }, 1500)
     }
-
-    finalizeCall()
   }, [isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState, callStatus])
 
   const fetchCampaigns = useCallback(async () => {
