@@ -36,6 +36,8 @@ interface CallData {
   id: string
   phone: string
   telephony_id: string
+  recordingLink?: string
+  qualificationName?: string
 }
 
 type ConnectionStatus = "disconnected" | "connecting" | "connected"
@@ -419,6 +421,7 @@ export default function ClickToCallSystem() {
 
           if (qualificationUsed) {
             setSelectedQualification({ id: qualificationUsed.id, name: qualificationUsed.name })
+            setActiveCall(prev => prev ? { ...prev, qualificationName: qualificationUsed.name } : null)
             updateStatus(``, "success")
           } else {
             updateStatus("Ligação qualificada com sucesso!", "success")
@@ -481,6 +484,13 @@ export default function ClickToCallSystem() {
           setIsCallQualified(false) // Ainda não foi qualificada
           setCallStatus("FAILED")
           break
+
+        case "call-history-was-created":
+          let recording_id = data.callHistory._id
+          const recordingLink = `https://app.3c.plus/api/v1/calls/${recording_id}/recording`
+          console.log(`Link da gravação: ${recordingLink}`)
+          setActiveCall(prev => prev ? { ...prev, recordingLink: recordingLink } : null)
+        break
 
         case "agent-login-failed":
           setConnectionStatus("disconnected")

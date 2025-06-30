@@ -13,6 +13,8 @@ export interface CallData {
   phone: string
   telephony_id: string
   status?: 'COMPLETED' | 'FAILED' | 'BUSY' | 'NO_ANSWER' | 'CANCELED'
+  recordingLink?: string // Adicionado para o link da gravação
+  qualificationName?: string // Adicionado para o nome da qualificação
 }
 
 let hubspotInstance: CallingExtensions | null = null
@@ -262,14 +264,13 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
     formattedPhoneNumberForHubspot = '+' + formattedPhoneNumberForHubspot
   }
 
-  // CORREÇÃO: Usar dialingContext diretamente (não dialingContextRef.current)
   const outgoingCallData: any = {
     toNumber: formattedPhoneNumberForHubspot,
     callStartTime: Date.now(),
     createEngagement: true,
     fromNumber: "+5542999998888",
     externalCallId: externalCallId,
-    dialingContext: dialingContext // CORREÇÃO: Usar a variável dialingContext diretamente
+    dialingContext: dialingContext // Usar a variável dialingContext diretamente
   }
 
   console.log("[HubSpot] Outgoing call data:", outgoingCallData)
@@ -378,6 +379,15 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
     formattedPhoneNumberForHubspot = '+' + formattedPhoneNumberForHubspot
   }
   
+  // Construir o hs_call_body
+  let callBody = `Número: ${callData.phone}\nStatus da Chamada: ${callStatus}`
+  if (callData.recordingLink) {
+    callBody += `\nLink da Gravação: ${callData.recordingLink}`
+  }
+  if (callData.qualificationName) {
+    callBody += `\nQualificação: ${callData.qualificationName}`
+  }
+
   const completionData: any = {
     engagementId: currentEngagementId,
     externalCallId: callData.telephony_id,
@@ -385,9 +395,9 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
     engagementProperties: {
       hs_call_status: callStatus,
       hs_timestamp: Date.now(),
-      hs_call_title: `Título da Chamada - ${formattedPhoneNumberForHubspot}`,
-      hs_call_direction: `OUTBOUND`, // added now
-      hs_call_body: `Número: ${callData.phone} \n Status da Chamada: ${callStatus}` // added now
+      hs_call_title: `Chamada - ${formattedPhoneNumberForHubspot}`,
+      hs_call_direction: `OUTBOUND`,
+      hs_call_body: callBody // Usar a string construída
     }
   }
 
