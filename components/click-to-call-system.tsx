@@ -71,6 +71,7 @@ export default function ClickToCallSystem() {
   const tokenRef = useRef<string>("")
   const connectionStatusRef = useRef<ConnectionStatus>("disconnected")
   const qualificationsRef = useRef<Qualification[]>([])
+  
 
   useEffect(() => {
     tokenRef.current = token
@@ -412,6 +413,7 @@ export default function ClickToCallSystem() {
           // Notifica o HubSpot que a chamada foi atendida
           if (activeCall) {
             notifyCallAnswered(activeCall)
+            console.log("✅ activeCall completo:", activeCall)
           }
           break
 
