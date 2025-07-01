@@ -357,6 +357,8 @@ export async function notifyCallEnded(callData: CallData) {
 }
 
 // Notifica o HubSpot que o processo de chamada foi completado
+// Função notifyCallCompleted corrigida no hubspot-call-provider.ts
+
 export async function notifyCallCompleted(callData: CallData, engagementData?: any, callStatus: string = 'COMPLETED') {
   if (!hubspotInstance) {
     console.warn("[HubSpot] SDK not initialized")
@@ -372,6 +374,7 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   }
 
   console.log("[HubSpot] Notifying call completed:", callData.phone, "with status:", callStatus, "and externalCallId:", externalCallId)
+  console.log("[HubSpot] CallData completo recebido:", callData) // DEBUG ADICIONAL
   
   // Garante que o número para o HubSpot tenha o '+'
   let formattedPhoneNumberForHubspot = callData.phone
@@ -379,14 +382,45 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
     formattedPhoneNumberForHubspot = '+' + formattedPhoneNumberForHubspot
   }
   
-  // Construir o hs_call_body
-  let callBody = `<p><strong>Número:</strong> ${callData.phone}</p>\n <p><strong>Status:</strong> ${callStatus}</p>`
-  if (callData.recordingLink) {
-    callBody += `\n<p>Link da Gravação: ${callData.recordingLink}</p>`
+  // CORREÇÃO: Construir o hs_call_body com verificações mais robustas
+  let callBody = `<p><strong>Número:</strong> ${callData.phone}</p>\n<p><strong>Status:</strong> ${callStatus}</p>`
+  
+  // CORREÇÃO: Verificações mais robustas para evitar valores undefined/null
+  console.log("[HubSpot] 🔍 Verificando recordingLink:", {
+    recordingLink: callData.recordingLink,
+    type: typeof callData.recordingLink,
+    hasValue: !!(callData.recordingLink && callData.recordingLink.trim())
+  })
+  
+  console.log("[HubSpot] 🔍 Verificando qualificationName:", {
+    qualificationName: callData.qualificationName,
+    type: typeof callData.qualificationName,
+    hasValue: !!(callData.qualificationName && callData.qualificationName.trim())
+  })
+  
+  // Verificar se temos link de gravação
+  if (callData.recordingLink && callData.recordingLink.trim() && callData.recordingLink !== 'undefined') {
+    callBody += `\n<p><strong>Link da Gravação:</strong> <a href="${callData.recordingLink}" target="_blank">Clique aqui para ouvir</a></p>`
+    console.log("[HubSpot] ✅ Adicionando link de gravação:", callData.recordingLink)
+  } else {
+    console.log("[HubSpot] ⚠️ Nenhum link de gravação válido encontrado")
   }
-  if (callData.qualificationName) {
-    callBody += `\n<p>Qualificação: ${callData.qualificationName}</p>`
+  
+  // Verificar se temos qualificação
+  if (callData.qualificationName && callData.qualificationName.trim() && callData.qualificationName !== 'undefined') {
+    callBody += `\n<p><strong>Qualificação:</strong> ${callData.qualificationName}</p>`
+    console.log("[HubSpot] ✅ Adicionando qualificação:", callData.qualificationName)
+  } else {
+    console.log("[HubSpot] ⚠️ Nenhuma qualificação válida encontrada")
   }
+
+  // CORREÇÃO: Se temos engagementData com qualification, usar como fallback
+  if (!callData.qualificationName && engagementData?.qualification?.name) {
+    callBody += `\n<p><strong>Qualificação:</strong> ${engagementData.qualification.name}</p>`
+    console.log("[HubSpot] ✅ Usando qualificação do engagementData:", engagementData.qualification.name)
+  }
+
+  console.log("[HubSpot] 📝 Call body final:", callBody) // DEBUG DO BODY FINAL
 
   const completionData: any = {
     engagementId: currentEngagementId,
@@ -397,7 +431,7 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
       hs_timestamp: Date.now(),
       hs_call_title: `Chamada - ${formattedPhoneNumberForHubspot}`,
       hs_call_direction: `OUTBOUND`,
-      hs_call_body: callBody // Usar a string construída
+      hs_call_body: callBody
     }
   }
 
@@ -420,10 +454,11 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
     completionData.subject = `Chamada - ${formattedPhoneNumberForHubspot}`
   }
 
-  console.log("[HubSpot] Call completed data:", completionData)
+  console.log("[HubSpot] 📊 Call completed data final:", completionData)
   
   try {
     hubspotInstance.callCompleted(completionData)
+    console.log("[HubSpot] ✅ callCompleted enviado com sucesso!")
   } catch (error) {
     console.error("[HubSpot] Error notifying call completed:", error)
     sendError({

@@ -118,8 +118,13 @@ export default function ClickToCallSystem() {
       } : undefined
       
       setTimeout(() => {
-        notifyCallCompleted(activeCall, engagementData, callStatus)
-      }, 3000)
+      console.log("🔄 Enviando dados para notifyCallCompleted:", {
+        activeCall,
+        engagementData,
+        callStatus
+      })
+      notifyCallCompleted(activeCall, engagementData, callStatus)
+    }, 1000)
 
 
       // Show completion message
@@ -426,7 +431,17 @@ export default function ClickToCallSystem() {
 
           if (qualificationUsed) {
             setSelectedQualification({ id: qualificationUsed.id, name: qualificationUsed.name })
-            setActiveCall(prev => prev ? { ...prev, qualificationName: qualificationUsed.name } : null)
+            
+            // CORREÇÃO: Atualizar o activeCall com o nome da qualificação
+            setActiveCall(prev => {
+              if (prev) {
+                const updatedCall = { ...prev, qualificationName: qualificationUsed.name }
+                console.log("✅ activeCall atualizado com qualification:", updatedCall)
+                return updatedCall
+              }
+              return null
+            })
+            
             updateStatus(``, "success")
           } else {
             updateStatus("Ligação qualificada com sucesso!", "success")
@@ -434,9 +449,7 @@ export default function ClickToCallSystem() {
 
           setIsCallQualified(true)
           setAgentStatus("call_qualified")
-          setIsLoading(false) // Stop loading state
-
-          // The useEffect will handle the transition if call is also finished
+          setIsLoading(false)
           break
 
         case "call-was-finished":
@@ -491,10 +504,19 @@ export default function ClickToCallSystem() {
           break
 
         case "call-history-was-created":
-          let recording_id = data.callHistory._id
-          const recordingLink = `https://app.3c.plus/api/v1/calls/${recording_id}/recording`
-          console.log(`Link da gravação: ${recordingLink}`)
-          setActiveCall(prev => prev ? { ...prev, recordingLink: recordingLink } : null)
+        let recording_id = data.callHistory._id
+        const recordingLink = `https://app.3c.plus/api/v1/calls/${recording_id}/recording`
+        console.log(`Link da gravação: ${recordingLink}`)
+        
+        // CORREÇÃO: Atualizar o activeCall corretamente
+        setActiveCall(prev => {
+          if (prev) {
+            const updatedCall = { ...prev, recordingLink: recordingLink }
+            console.log("✅ activeCall atualizado com recording:", updatedCall)
+            return updatedCall
+          }
+          return null
+        })
         break
 
         case "agent-login-failed":
