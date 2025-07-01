@@ -117,7 +117,10 @@ export default function ClickToCallSystem() {
         qualification: selectedQualification
       } : undefined
       
-      notifyCallCompleted(activeCall, engagementData, callStatus)
+      setTimeout(() => {
+        notifyCallCompleted(activeCall, engagementData, callStatus)
+      }, 3000)
+
 
       // Show completion message
       updateStatus(`Ligação finalizada: ${activeCall.phone}. Pronto para nova ligação.`, "success")
