@@ -67,6 +67,9 @@ export default function ClickToCallSystem() {
   const [callFinished, setCallFinished] = useState(false)
   const [callStatus, setCallStatus] = useState<string>("COMPLETED")
 
+  // NOVO: Ref para armazenar dados da chamada de forma mais robusta
+  const callDataRef = useRef<CallData | null>(null)
+
   const socketRef = useRef<Socket | null>(null)
   const tokenRef = useRef<string>("")
   const connectionStatusRef = useRef<ConnectionStatus>("disconnected")
@@ -81,6 +84,11 @@ export default function ClickToCallSystem() {
     connectionStatusRef.current = connectionStatus
   }, [connectionStatus])
 
+  // NOVO: Sincronizar callDataRef com activeCall
+  useEffect(() => {
+    callDataRef.current = activeCall
+  }, [activeCall])
+
   const updateStatus = useCallback((message: string, type: StatusMessage["type"] = "info") => {
     setStatus({ message, type })
   }, [])
@@ -88,6 +96,7 @@ export default function ClickToCallSystem() {
   const resetCallState = useCallback(() => {
     console.log("🧹 Resetting call state completely")
     setActiveCall(null)
+    callDataRef.current = null // NOVO: Limpar também o ref
     setQualifications([])
     setSelectedQualification(null)
     setIsCallQualified(false)
@@ -105,41 +114,69 @@ export default function ClickToCallSystem() {
     resetCallState()
   }, [resetCallState])
 
+  // NOVO: Função para atualizar dados da chamada de forma mais robusta
+  const updateCallData = useCallback((updates: Partial<CallData>) => {
+    setActiveCall(prev => {
+      if (prev) {
+        const updated = { ...prev, ...updates }
+        callDataRef.current = updated // Atualizar ref imediatamente
+        console.log("🔄 Call data updated:", updated)
+        return updated
+      }
+      return null
+    })
+  }, [])
+
+  // NOVO: Função para finalizar chamada com dados completos
+  const finalizeCall = useCallback(async () => {
+    console.log("🏁 Finalizing call with complete data")
+    
+    // Aguardar um pouco para garantir que todos os dados estão disponíveis
+    await new Promise(resolve => setTimeout(resolve, 500))
+    
+    const finalCallData = callDataRef.current
+    if (!finalCallData) {
+      console.error("❌ No call data available for finalization")
+      return
+    }
+
+    console.log("📊 Final call data:", finalCallData)
+
+    // Notifica o HubSpot que a chamada foi completada
+    const engagementData = selectedQualification ? {
+      notes: `Chamada qualificada como: ${selectedQualification.name}`,
+      subject: `Chamada - ${finalCallData.phone}`,
+      qualification: selectedQualification
+    } : undefined
+    
+    console.log("🔄 Enviando dados para notifyCallCompleted:", {
+      finalCallData,
+      engagementData,
+      callStatus
+    })
+    
+    await notifyCallCompleted(finalCallData, engagementData, callStatus)
+
+    // Show completion message
+    updateStatus(`Ligação finalizada: ${finalCallData.phone}. Pronto para nova ligação.`, "success")
+
+    // Reset to logged_in state (dial screen)
+    setAgentStatus("logged_in")
+
+    // Reset call state after a brief delay to show the completion message
+    setTimeout(() => {
+      resetCallState()
+      updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
+    }, 1500)
+  }, [selectedQualification, callStatus, updateStatus, resetCallState, selectedCampaign])
+
   // Watch for both conditions to be met and automatically transition to dial
   useEffect(() => {
-    if (isCallQualified && callFinished && activeCall) {
-      console.log("✅ Both qualification and call finished - transitioning to dial")
-
-      // Notifica o HubSpot que a chamada foi completada
-      const engagementData = selectedQualification ? {
-        notes: `Chamada qualificada como: ${selectedQualification.name}`,
-        subject: `Chamada - ${activeCall.phone}`,
-        qualification: selectedQualification
-      } : undefined
-      
-      setTimeout(() => {
-      console.log("🔄 Enviando dados para notifyCallCompleted:", {
-        activeCall,
-        engagementData,
-        callStatus
-      })
-      notifyCallCompleted(activeCall, engagementData, callStatus)
-    }, 1000)
-
-
-      // Show completion message
-      updateStatus(`Ligação finalizada: ${activeCall.phone}. Pronto para nova ligação.`, "success")
-
-      // Reset to logged_in state (dial screen)
-      setAgentStatus("logged_in")
-
-      // Reset call state after a brief delay to show the completion message
-      setTimeout(() => {
-        resetCallState()
-        updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
-      }, 1500)
+    if (isCallQualified && callFinished && callDataRef.current) {
+      console.log("✅ Both qualification and call finished - finalizing call")
+      finalizeCall()
     }
-  }, [isCallQualified, callFinished, activeCall, selectedCampaign, selectedQualification, updateStatus, resetCallState, callStatus])
+  }, [isCallQualified, callFinished, finalizeCall])
 
   const fetchCampaigns = useCallback(async () => {
     if (!tokenRef.current || connectionStatusRef.current !== "connected") {
@@ -311,6 +348,10 @@ export default function ClickToCallSystem() {
 
         // Set selected qualification immediately for UI feedback
         setSelectedQualification(qualification)
+        
+        // NOVO: Atualizar dados da chamada com qualificação
+        updateCallData({ qualificationName: qualification.name })
+        
         updateStatus(`Qualificação usada: ${qualification.name}`, "success")
       } catch (error) {
         console.error("❌ Qualification error:", error)
@@ -318,7 +359,7 @@ export default function ClickToCallSystem() {
         setIsLoading(false)
       }
     },
-    [activeCall, updateStatus],
+    [activeCall, updateStatus, updateCallData],
   )
 
   const hangupCall = useCallback(async () => {
@@ -396,6 +437,7 @@ export default function ClickToCallSystem() {
           }
           
           setActiveCall(callData)
+          callDataRef.current = callData // NOVO: Atualizar ref imediatamente
           setAgentStatus("in_call")
 
           // Notifica o HubSpot que uma chamada está sendo iniciada APENAS AGORA
@@ -419,9 +461,9 @@ export default function ClickToCallSystem() {
           updateStatus("Ligação atendida! Qualifique quando necessário.", "info")
           
           // Notifica o HubSpot que a chamada foi atendida
-          if (activeCall) {
-            notifyCallAnswered(activeCall)
-            console.log("✅ activeCall completo:", activeCall)
+          if (callDataRef.current) {
+            notifyCallAnswered(callDataRef.current)
+            console.log("✅ activeCall completo:", callDataRef.current)
           }
           break
 
@@ -432,15 +474,8 @@ export default function ClickToCallSystem() {
           if (qualificationUsed) {
             setSelectedQualification({ id: qualificationUsed.id, name: qualificationUsed.name })
             
-            // CORREÇÃO: Atualizar o activeCall com o nome da qualificação
-            setActiveCall(prev => {
-              if (prev) {
-                const updatedCall = { ...prev, qualificationName: qualificationUsed.name }
-                console.log("✅ activeCall atualizado com qualification:", updatedCall)
-                return updatedCall
-              }
-              return null
-            })
+            // NOVO: Usar updateCallData para atualizar de forma mais robusta
+            updateCallData({ qualificationName: qualificationUsed.name })
             
             updateStatus(``, "success")
           } else {
@@ -475,8 +510,8 @@ export default function ClickToCallSystem() {
           updateStatus("Ligação não foi atendida pelo cliente. Selecione uma qualificação.", "info")
           
           // Notifica o HubSpot que a chamada foi finalizada (não atendida)
-          if (activeCall) {
-            notifyCallEnded(activeCall)
+          if (callDataRef.current) {
+            notifyCallEnded(callDataRef.current)
           }
           
           // Definir como call_answered para mostrar as qualificações
@@ -491,8 +526,8 @@ export default function ClickToCallSystem() {
           updateStatus("Ligação falhou!", "info")
           
           // Notifica o HubSpot que a chamada foi finalizada (falhou)
-          if (activeCall) {
-            notifyCallEnded(activeCall)
+          if (callDataRef.current) {
+            notifyCallEnded(callDataRef.current)
           }
           
           // Definindo como call_answered para mostrar as qualificações
@@ -504,20 +539,13 @@ export default function ClickToCallSystem() {
           break
 
         case "call-history-was-created":
-        let recording_id = data.callHistory._id
-        const recordingLink = `https://app.3c.plus/api/v1/calls/${recording_id}/recording`
-        console.log(`Link da gravação: ${recordingLink}`)
-        
-        // CORREÇÃO: Atualizar o activeCall corretamente
-        setActiveCall(prev => {
-          if (prev) {
-            const updatedCall = { ...prev, recordingLink: recordingLink }
-            console.log("✅ activeCall atualizado com recording:", updatedCall)
-            return updatedCall
-          }
-          return null
-        })
-        break
+          let recording_id = data.callHistory._id
+          const recordingLink = `https://app.3c.plus/api/v1/calls/${recording_id}/recording`
+          console.log(`Link da gravação: ${recordingLink}`)
+          
+          // NOVO: Usar updateCallData para atualizar de forma mais robusta
+          updateCallData({ recordingLink: recordingLink })
+          break
 
         case "agent-login-failed":
           setConnectionStatus("disconnected")
@@ -537,7 +565,7 @@ export default function ClickToCallSystem() {
           console.log("🔍 Unhandled socket event:", event, data)
       }
     },
-    [campaigns, selectedCampaign, phoneNumber, isCallQualified, activeCall, fetchCampaigns, updateStatus, resetAllState],
+    [campaigns, selectedCampaign, phoneNumber, isCallQualified, fetchCampaigns, updateStatus, resetAllState, updateCallData],
   )
 
   const connectSocket = useCallback(() => {
@@ -748,7 +776,7 @@ export default function ClickToCallSystem() {
           </Alert>
         )}
 
-        {connectionStatus === "disconnected" && (
+                {connectionStatus === "disconnected" && (
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="token">Token de Operador</Label>
