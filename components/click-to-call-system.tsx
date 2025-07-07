@@ -20,6 +20,7 @@ import {
   sendError,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
+import { disconnect } from "process"
 
 // Types
 interface Campaign {
@@ -59,7 +60,7 @@ export default function ClickToCallSystem() {
   const [activeCall, setActiveCall] = useState<CallData | null>(null)
   const [qualifications, setQualifications] = useState<Qualification[]>([])
   const [selectedQualification, setSelectedQualification] = useState<Qualification | null>(null)
-  const [status, setStatus] = useState<StatusMessage>({ message: "Insira um Token de Operador para começar", type: "info" })
+  const [status, setStatus] = useState<StatusMessage>({ message: "Inicializando...", type: "loading" })
   const [isLoading, setIsLoading] = useState(false)
 
   // Track call completion states
@@ -74,6 +75,10 @@ export default function ClickToCallSystem() {
   const tokenRef = useRef<string>("")
   const connectionStatusRef = useRef<ConnectionStatus>("disconnected")
   const qualificationsRef = useRef<Qualification[]>([])
+  
+  // NOVO: Refs para controlar o fluxo de conexão
+  const agentConnectedTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const extensionWindowRef = useRef<Window | null>(null)
   
 
   useEffect(() => {
@@ -91,6 +96,23 @@ export default function ClickToCallSystem() {
 
   const updateStatus = useCallback((message: string, type: StatusMessage["type"] = "info") => {
     setStatus({ message, type })
+  }, [])
+
+  // NOVO: Funções para gerenciar estado da extensão no localStorage
+  const setExtensionOpen = useCallback((isOpen: boolean) => {
+    if (isOpen) {
+      localStorage.setItem("3c_extension_open", "true")
+      console.log("📱 Marcando extensão como aberta no localStorage")
+    } else {
+      localStorage.removeItem("3c_extension_open")
+      console.log("🚪 Removendo extensão do localStorage")
+    }
+  }, [])
+
+  const isExtensionOpen = useCallback(() => {
+    const isOpen = localStorage.getItem("3c_extension_open") === "true"
+    console.log(`🔍 Verificando extensão no localStorage: ${isOpen ? "ABERTA" : "FECHADA"}`)
+    return isOpen
   }, [])
 
   const resetCallState = useCallback(() => {
@@ -113,6 +135,47 @@ export default function ClickToCallSystem() {
     setAgentStatus("idle")
     resetCallState()
   }, [resetCallState])
+
+  // NOVO: Função para retornar ao estado desconectado
+  const returnToDisconnectedState = useCallback(() => {
+    console.log("🔄 Retornando ao estado desconectado")
+    
+    // Limpar timeouts
+    if (agentConnectedTimeoutRef.current) {
+      clearTimeout(agentConnectedTimeoutRef.current)
+      agentConnectedTimeoutRef.current = null
+    }
+    
+    // Desconectar socket
+    if (socketRef.current) {
+      socketRef.current.removeAllListeners()
+      socketRef.current.disconnect()
+      socketRef.current = null
+    }
+    
+    // Fechar janela da extensão se estiver aberta
+    if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
+      extensionWindowRef.current.close()
+      extensionWindowRef.current = null
+    }
+    
+    // Marcar extensão como fechada
+    setExtensionOpen(false)
+    
+    // Resetar estados
+    setConnectionStatus("disconnected")
+    setAgentStatus("idle")
+    resetAllState()
+    
+    // Carregar token do localStorage se existir
+    const storedToken = localStorage.getItem("3c_api_token")
+    if (storedToken) {
+      setToken(storedToken)
+      updateStatus("Insira um Token de Operador para começar", "info")
+    } else {
+      updateStatus("Insira um Token de Operador para começar", "info")
+    }
+  }, [resetAllState, updateStatus, setExtensionOpen])
 
   // NOVO: Função para atualizar dados da chamada de forma mais robusta
   const updateCallData = useCallback((updates: Partial<CallData>) => {
@@ -178,34 +241,111 @@ export default function ClickToCallSystem() {
     }
   }, [isCallQualified, callFinished, finalizeCall])
 
+  // NOVO: Wrapper para chamadas de API com detecção de falhas e reabertura automática
+  const apiCallWithErrorHandling = useCallback(async (
+    apiCall: () => Promise<Response>,
+    actionName: string,
+    retryAction?: () => Promise<void>
+  ): Promise<Response | null> => {
+    try {
+      console.log(`🔄 Executando ${actionName}...`)
+      const response = await apiCall()
+      
+      if (!response.ok) {
+        console.error(`❌ ${actionName} falhou com status ${response.status}`)
+        
+        // Se a resposta indica que a extensão não está conectada (ex: 401, 403, 500)
+        if ([401, 403, 500, 502, 503].includes(response.status)) {
+          console.log("🚨 Erro indica que extensão pode estar fechada - reabrindo...")
+          
+          // Marcar extensão como fechada
+          setExtensionOpen(false)
+          
+          // Mostrar mensagem ao usuário
+          updateStatus("Extensão desconectada. Reabrindo automaticamente...", "info")
+          
+          // Reabrir extensão
+          await openExtension()
+          
+          // Aguardar um pouco para a extensão carregar
+          await new Promise(resolve => setTimeout(resolve, 3000))
+          
+          // Se há uma ação de retry, executá-la
+          if (retryAction) {
+            console.log(`🔄 Tentando ${actionName} novamente após reabrir extensão...`)
+            await retryAction()
+          } else {
+            updateStatus("Extensão reaberta. Tente a ação novamente.", "info")
+          }
+          
+          return null
+        }
+        
+        throw new Error(`HTTP ${response.status}`)
+      }
+      
+      console.log(`✅ ${actionName} executado com sucesso`)
+      return response
+      
+    } catch (error) {
+      console.error(`❌ Erro em ${actionName}:`, error)
+      
+      // Se é erro de rede, também tentar reabrir extensão
+      if (error instanceof TypeError && error.message.includes('fetch')) {
+        console.log("🚨 Erro de rede detectado - reabrindo extensão...")
+        setExtensionOpen(false)
+        updateStatus("Erro de conexão. Reabrindo extensão...", "info")
+        await openExtension()
+        
+        if (retryAction) {
+          await new Promise(resolve => setTimeout(resolve, 3000))
+          await retryAction()
+        }
+      }
+      
+      return null
+    }
+  }, [updateStatus, setExtensionOpen])
+
   const fetchCampaigns = useCallback(async () => {
     if (!tokenRef.current || connectionStatusRef.current !== "connected") {
       console.log("❌ Cannot fetch campaigns - no token or not connected")
       return
     }
 
+    const fetchAction = () => fetch(
+      `https://app.3c.plus/api/v1/groups-and-campaigns?all=true&paused=0&api_token=${tokenRef.current}`,
+    )
+
+    const retryAction = async () => {
+      // Aguardar reconexão e tentar novamente
+      setTimeout(() => {
+        if (connectionStatusRef.current === "connected") {
+          fetchCampaigns()
+        }
+      }, 2000)
+    }
+
     try {
       setIsLoading(true)
       updateStatus("Buscando campanhas...", "loading")
 
-      const response = await fetch(
-        `https://app.3c.plus/api/v1/groups-and-campaigns?all=true&paused=0&api_token=${tokenRef.current}`,
-      )
+      const response = await apiCallWithErrorHandling(fetchAction, "buscar campanhas", retryAction)
+      
+      if (response) {
+        const data = await response.json()
+        const campaignList = data?.data?.filter((c: any) => c.type === "campaign") || []
 
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-
-      const data = await response.json()
-      const campaignList = data?.data?.filter((c: any) => c.type === "campaign") || []
-
-      setCampaigns(campaignList)
-      updateStatus(`${campaignList.length} campanhas encontradas. Escolha uma para fazer login.`, "success")
+        setCampaigns(campaignList)
+        updateStatus(`${campaignList.length} campanhas encontradas. Escolha uma para fazer login.`, "success")
+      }
     } catch (error) {
       console.error("❌ Error fetching campaigns:", error)
       updateStatus("Erro ao buscar campanhas. Verifique seu token.", "error")
     } finally {
       setIsLoading(false)
     }
-  }, [updateStatus])
+  }, [updateStatus, apiCallWithErrorHandling])
 
   const loginToCampaign = useCallback(
     async (campaign: Campaign) => {
@@ -214,23 +354,36 @@ export default function ClickToCallSystem() {
         return
       }
 
+      const loginAction = () => fetch(
+        `https://app.3c.plus/api/v1/agent/login?api_token=${encodeURIComponent(tokenRef.current)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ campaign: campaign.id, mode: "manual" }),
+        },
+      )
+
+      const retryAction = async () => {
+        // Aguardar e tentar login novamente
+        setTimeout(() => {
+          if (connectionStatusRef.current === "connected") {
+            loginToCampaign(campaign)
+          }
+        }, 2000)
+      }
+
       try {
         setIsLoading(true)
         updateStatus("Fazendo login na campanha...", "loading")
 
-        const response = await fetch(
-          `https://app.3c.plus/api/v1/agent/login?api_token=${encodeURIComponent(tokenRef.current)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ campaign: campaign.id, mode: "manual" }),
-          },
-        )
+        const response = await apiCallWithErrorHandling(loginAction, "login na campanha", retryAction)
 
-        if (!response.ok) throw new Error(`Login failed: HTTP ${response.status}`)
-
-        setSelectedCampaign(campaign)
-        setCampaigns([])
+        if (response) {
+          localStorage.setItem("3c_api_token", tokenRef.current)
+          setSelectedCampaign(campaign)
+          setCampaigns([])
+          updateStatus("Login realizado com sucesso!", "success")
+        }
       } catch (error) {
         console.error("❌ Login error:", error)
         updateStatus("Erro ao fazer login. Tente novamente.", "error")
@@ -238,39 +391,39 @@ export default function ClickToCallSystem() {
         setIsLoading(false)
       }
     },
-    [agentStatus, updateStatus],
+    [agentStatus, updateStatus, apiCallWithErrorHandling],
   )
   
-    const logoutFromCampaign = useCallback(async () => { //Início da função de sair da Campanha
+  const logoutFromCampaign = useCallback(async () => {
     if (!tokenRef.current.trim()) {
       updateStatus("Token é obrigatório", "error")
       return
     }
 
+    const logoutAction = () => fetch(
+      `https://wosiak.3c.plus/api/v1/agent/logout?api_token=${encodeURIComponent(tokenRef.current)}`,
+      { method: "POST" }
+    )
+
     try {
       setIsLoading(true)
       updateStatus("Saindo da campanha...", "loading")
 
-      const response = await fetch(
-        `https://wosiak.3c.plus/api/v1/agent/logout?api_token=${encodeURIComponent(tokenRef.current)}`,
-       { method: "POST" }
-     )
+      const response = await apiCallWithErrorHandling(logoutAction, "logout da campanha")
 
-     if (!response.ok) throw new Error(`Logout failed: HTTP ${response.status}`)
-
-   // Notifica o HubSpot e limpa todo o estado
-      notifyUserLoggedOut()
-      resetAllState()
-      
-     updateStatus("Logout realizado com sucesso!", "success")
-     setConnectionStatus("disconnected")
-   } catch (error) {
-     console.error("❌ Logout error:", error)
-     updateStatus("Erro ao sair da campanha", "error")
-   } finally {
-     setIsLoading(false)
-   }
- }, [updateStatus, resetAllState]) //Fim da função de sair da Campanha
+      if (response) {
+        // Notifica o HubSpot e limpa todo o estado
+        notifyUserLoggedOut()
+        returnToDisconnectedState()
+        updateStatus("Logout realizado com sucesso!", "success")
+      }
+    } catch (error) {
+      console.error("❌ Logout error:", error)
+      updateStatus("Erro ao sair da campanha", "error")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [updateStatus, returnToDisconnectedState, apiCallWithErrorHandling])
 
   const makeCall = useCallback(async (number?: string) => {
     // Se number for um objeto (evento de clique), ignorar e usar phoneNumber
@@ -285,25 +438,14 @@ export default function ClickToCallSystem() {
     console.log("[3C Plus] makeCall - phoneNumber state:", phoneNumber, typeof phoneNumber)
     console.log("[3C Plus] makeCall - target final:", target, typeof target)
     
-    if (!target || agentStatus !== "logged_in") {
+    /*if (!target || agentStatus !== "logged_in") {
       updateStatus("Insira um número válido", "error")
       return
-    }
+    }*/
 
-    try {
-      setIsLoading(true)
-      setAgentStatus("dialing")
-      updateStatus("Iniciando chamada...", "loading")
-
-      // Criar o payload explicitamente como objeto com string
-      const payload = {
-        phone: target // Garantir que seja string
-      }
-      
-      console.log("[3C Plus] Payload object:", payload)
-      console.log("[3C Plus] Payload JSON:", JSON.stringify(payload))
-      
-      const response = await fetch(
+    const callAction = () => {
+      const payload = { phone: target }
+      return fetch(
         `https://app.3c.plus/api/v1/agent/manual_call/dial?api_token=${encodeURIComponent(tokenRef.current)}`,
         {
           method: "POST",
@@ -311,10 +453,30 @@ export default function ClickToCallSystem() {
           body: JSON.stringify(payload),
         },
       )
+    }
 
-      if (!response.ok) throw new Error(`Dial failed: HTTP ${response.status}`)
+    const retryAction = async () => {
+      // Aguardar e tentar chamada novamente
+      setTimeout(() => {
+        if (connectionStatusRef.current === "connected" && agentStatus === "logged_in") {
+          makeCall(target)
+        }
+      }, 2000)
+    }
+
+    try {
+      setIsLoading(true)
+      setAgentStatus("dialing")
+      updateStatus("Iniciando chamada...", "loading")
+
+      const response = await apiCallWithErrorHandling(callAction, "iniciar chamada", retryAction)
       
-      updateStatus(`Discando para ${target}...`, "info")
+      if (response) {
+        updateStatus(`Discando para ${target}...`, "info")
+      } else {
+        // Se falhou, voltar ao estado anterior
+        setAgentStatus("logged_in")
+      }
     } catch (error) {
       console.error("❌ Call error:", error)
       updateStatus("Erro ao iniciar chamada", "error")
@@ -322,7 +484,7 @@ export default function ClickToCallSystem() {
     } finally {
       setIsLoading(false)
     }
-  }, [phoneNumber, agentStatus, updateStatus])
+  }, [phoneNumber, agentStatus, updateStatus, apiCallWithErrorHandling])
 
   const qualifyCall = useCallback(
     async (qualification: Qualification) => {
@@ -331,39 +493,65 @@ export default function ClickToCallSystem() {
         return
       }
 
+      const qualifyAction = () => fetch(
+        `https://app.3c.plus/api/v1/agent/manual_call/${activeCall.telephony_id}/qualify?api_token=${encodeURIComponent(tokenRef.current)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ qualification_id: String(qualification.id) }),
+        },
+      )
+
+      const retryAction = async () => {
+        // Aguardar e tentar qualificação novamente
+        setTimeout(() => {
+          if (connectionStatusRef.current === "connected" && activeCall) {
+            qualifyCall(qualification)
+          }
+        }, 2000)
+      }
+
       try {
         setIsLoading(true)
         updateStatus("Qualificando chamada...", "loading")
 
-        const response = await fetch(
-          `https://app.3c.plus/api/v1/agent/manual_call/${activeCall.telephony_id}/qualify?api_token=${encodeURIComponent(tokenRef.current)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({ qualification_id: String(qualification.id) }),
-          },
-        )
+        const response = await apiCallWithErrorHandling(qualifyAction, "qualificar chamada", retryAction)
 
-        if (!response.ok) throw new Error(`Qualification failed: HTTP ${response.status}`)
-
-        // Set selected qualification immediately for UI feedback
-        setSelectedQualification(qualification)
-        
-        // NOVO: Atualizar dados da chamada com qualificação
-        updateCallData({ qualificationName: qualification.name })
-        
-        updateStatus(`Qualificação usada: ${qualification.name}`, "success")
+        if (response) {
+          // Set selected qualification immediately for UI feedback
+          setSelectedQualification(qualification)
+          
+          // NOVO: Atualizar dados da chamada com qualificação
+          updateCallData({ qualificationName: qualification.name })
+          
+          updateStatus(`Qualificação usada: ${qualification.name}`, "success")
+        }
       } catch (error) {
         console.error("❌ Qualification error:", error)
         updateStatus("Erro ao qualificar chamada", "error")
+      } finally {
         setIsLoading(false)
       }
     },
-    [activeCall, updateStatus, updateCallData],
+    [activeCall, updateStatus, updateCallData, apiCallWithErrorHandling],
   )
 
   const hangupCall = useCallback(async () => {
     if (!activeCall?.id) return
+
+    const hangupAction = () => fetch(
+      `https://app.3c.plus/api/v1/agent/call/${activeCall.id}/hangup?api_token=${tokenRef.current}`,
+      { method: "POST" },
+    )
+
+    const retryAction = async () => {
+      // Aguardar e tentar hangup novamente
+      setTimeout(() => {
+        if (connectionStatusRef.current === "connected" && activeCall) {
+          hangupCall()
+        }
+      }, 2000)
+    }
 
     try {
       setIsLoading(true)
@@ -372,25 +560,28 @@ export default function ClickToCallSystem() {
       // Notifica o HubSpot que a chamada está sendo encerrada
       notifyCallEnded(activeCall)
 
-      const response = await fetch(
-        `https://app.3c.plus/api/v1/agent/call/${activeCall.id}/hangup?api_token=${tokenRef.current}`,
-        {
-          method: "POST",
-        },
-      )
-
-      if (!response.ok) throw new Error(`Hangup failed: HTTP ${response.status}`)
+      const response = await apiCallWithErrorHandling(hangupAction, "encerrar chamada", retryAction)
+      
+      if (response) {
+        updateStatus("Chamada encerrada com sucesso", "success")
+      }
     } catch (error) {
       console.error("❌ Hangup error:", error)
       updateStatus("Erro ao encerrar chamada", "error")
+    } finally {
       setIsLoading(false)
     }
-  }, [activeCall, updateStatus])
+  }, [activeCall, updateStatus, apiCallWithErrorHandling])
 
-  // Initialize HubSpot calling bridge
+    // Initialize HubSpot calling bridge - recreate whenever agentStatus changes
   useEffect(() => {
+    console.log("[3C Plus] Reinicializando HubSpot provider com agentStatus:", agentStatus)
+    
     initHubspotCallProvider({
-      dial: (num: string) => makeCall(num),
+      dial: (num: string) => {
+        console.log("[3C Plus] dial() chamado diretamente com:", num, typeof num)
+        makeCall(num)
+      },
       hangup: hangupCall,
       qualify: (qId: string) => {
         qualifyCall({ id: Number(qId), name: qId })
@@ -399,11 +590,38 @@ export default function ClickToCallSystem() {
         console.log("[3C Plus] fillPhoneNumber recebido:", num, typeof num)
         const cleanNum = String(num).trim()
         console.log("[3C Plus] fillPhoneNumber limpo:", cleanNum, typeof cleanNum)
+        
+        // Sempre atualizar o campo de input
         setPhoneNumber(cleanNum)
-        updateStatus(`Número ${cleanNum} preenchido pelo HubSpot. Clique em "Discar" para iniciar a chamada.`, "info")
+        
+        // Função para verificar status e discar - usando refs para ter valores mais atuais
+        const checkStatusAndDial = () => {
+          // Aguardar um pouco para garantir que os estados estão sincronizados
+          setTimeout(() => {
+            // Verificar o agentStatus atual usando callback do setState
+            setAgentStatus(currentStatus => {
+              console.log("[3C Plus] Status atual no momento da verificação:", currentStatus)
+              
+              if (currentStatus === "logged_in" && cleanNum) {
+                console.log("[3C Plus] Agente logado e número válido - iniciando discagem automática")
+                updateStatus(`Número ${cleanNum} recebido do HubSpot. Discando automaticamente...`, "info")
+                
+                // Executar a chamada
+                makeCall(cleanNum)
+              } else {
+                console.log(`[3C Plus] Agente não está logado (${currentStatus}) - número será discado quando fizer login`)
+                updateStatus(`Número ${cleanNum} preenchido pelo HubSpot. ${currentStatus !== "logged_in" ? "Aguardando login..." : "Clique em 'Discar' para iniciar a chamada."}`, "info")
+              }
+              
+              return currentStatus // Retornar o mesmo status sem alteração
+            })
+          }, 200)
+        }
+        
+        checkStatusAndDial()
       },
     })
-  }, [makeCall, hangupCall, qualifyCall, updateStatus])
+  }, [makeCall, hangupCall, qualifyCall, updateStatus, agentStatus]) // Agora vai recriar sempre que agentStatus mudar
 
   const handleSocketEvent = useCallback(
     (event: string, data: any) => {
@@ -412,9 +630,73 @@ export default function ClickToCallSystem() {
       switch (event) {
         case "connected":
           setConnectionStatus("connected")
-          updateStatus("Extensão conectada! Buscando campanhas...", "success")
+          updateStatus("Socket conectado! Verificando status do agente...", "success")
           notifyUserAvailable()
-          fetchCampaigns()
+          
+          // NOVO: Fazer POST para /agent/connect automaticamente após socket conectar
+          const currentToken = tokenRef.current
+          if (currentToken) {
+            fetch(`https://app.3c.plus/api/v1/agent/connect?api_token=${encodeURIComponent(currentToken)}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" }
+            })
+            .then(response => {
+              if (response.ok) {
+                console.log("📡 POST /agent/connect realizado automaticamente após socket conectar")
+              } else {
+                console.error("❌ Erro no POST /agent/connect automático:", response.status)
+              }
+            })
+            .catch(error => {
+              console.error("❌ Erro no POST /agent/connect automático:", error)
+            })
+          }
+          break
+
+        // NOVO: Tratamento do evento agent-is-connected
+        case "agent-is-connected":
+          console.log("🔗 Agent is connected event received:", data)
+          
+          // Limpar timeout se existir
+          if (agentConnectedTimeoutRef.current) {
+            clearTimeout(agentConnectedTimeoutRef.current)
+            agentConnectedTimeoutRef.current = null
+          }
+
+          // Verificar o status do agente
+          const agentStatus = data?.status
+          
+          if (agentStatus === 0) {
+            // Status 0: Operador precisa fazer login (escolher campanha)
+            setConnectionStatus("connected")
+            setAgentStatus("idle")
+            updateStatus("Operador conectado. Escolha uma campanha para fazer login.", "success")
+            notifyUserAvailable()
+            fetchCampaigns()
+          } else if (agentStatus === 4) {
+            // Status 4: Operador já está logado (tela de discagem)
+            setConnectionStatus("connected")
+            setAgentStatus("logged_in")
+            notifyUserLoggedIn()
+            updateStatus("Operador já está logado. Pronto para discar.", "success")
+          } else {
+            // Outros status - tratar como conectado mas aguardando
+            setConnectionStatus("connected")
+            updateStatus(`Operador conectado (status: ${agentStatus}). Aguardando...`, "info")
+          }
+          break
+
+        // NOVO: Tratamento do evento agent-was-logged-out
+        case "agent-was-logged-out":
+          console.log("🚪 Agent was logged out event received:", data)
+          
+          // Marcar extensão como fechada no localStorage
+          setExtensionOpen(false)
+          
+          // Retornar ao estado desconectado
+          returnToDisconnectedState()
+          
+          updateStatus("Operador foi desconectado. Clique em 'Conectar' para reconectar.", "info")
           break
 
         case "agent-entered-manual":
@@ -548,145 +830,233 @@ export default function ClickToCallSystem() {
           break
 
         case "agent-login-failed":
-          setConnectionStatus("disconnected")
-          setAgentStatus("idle")
           updateStatus("Login falhou! Cheque microfone + rede, recarregue a página e tente novamente!", "error")
-          resetAllState()
+          returnToDisconnectedState()
           break
         
         case "disconnected":
-          setConnectionStatus("disconnected")
-          setAgentStatus("idle")
           updateStatus("Desconectado do servidor", "error")
-          resetAllState()
+          returnToDisconnectedState()
           break
 
         default:
           console.log("🔍 Unhandled socket event:", event, data)
       }
     },
-    [campaigns, selectedCampaign, phoneNumber, isCallQualified, fetchCampaigns, updateStatus, resetAllState, updateCallData],
+    [campaigns, selectedCampaign, phoneNumber, isCallQualified, fetchCampaigns, updateStatus, returnToDisconnectedState, updateCallData, setExtensionOpen],
   )
 
   const connectSocket = useCallback(() => {
-    if (!tokenRef.current.trim()) {
+  const token = tokenRef.current?.trim()
+  if (!token) {
+    updateStatus("Token é obrigatório", "error")
+    return
+  }
+
+  if (socketRef.current) {
+    socketRef.current.removeAllListeners()
+    socketRef.current.disconnect()
+  }
+
+  setConnectionStatus("connecting")
+  console.log("📡 Guardando o api_token")
+  localStorage.setItem("3c_api_token", token)
+  updateStatus("Conectando ao servidor...", "loading")
+
+  try {
+    const socket = io("https://socket.3c.plus", {
+      transports: ["websocket"],
+      query: { token }
+    })
+
+    socketRef.current = socket
+
+    socket.onAny((event, data) => {
+      handleSocketEvent(event, data)
+    })
+
+    socket.on("connect", () => {
+      handleSocketEvent("connected", {})
+    })
+
+    socket.on("disconnect", (reason) => {
+      handleSocketEvent("disconnected", { reason })
+    })
+
+    socket.on("connect_error", () => {
+      updateStatus("Erro ao conectar. Verifique seu token.", "error")
+      returnToDisconnectedState()
+    })
+  } catch (error) {
+    updateStatus("Erro ao criar conexão", "error")
+    returnToDisconnectedState()
+  }
+}, [handleSocketEvent, updateStatus, returnToDisconnectedState])
+
+// NOVO: Função openExtension com controle via localStorage
+const openExtension = useCallback(async () => {
+  const token = tokenRef.current?.trim()
+  if (!token) {
+    updateStatus("Token é obrigatório", "error")
+    return
+  }
+
+  // NOVO: Verificar se extensão já está aberta via localStorage
+  if (isExtensionOpen()) {
+    console.log("🚫 Extensão já está aberta (localStorage), não abrindo novamente")
+    updateStatus("Extensão já está aberta. Aguardando conexão...", "info")
+    return
+  }
+
+  const url = `https://app.3c.plus/extension?api_token=${encodeURIComponent(token)}`
+  
+  // Fechar janela anterior se existir
+  if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
+    extensionWindowRef.current.close()
+  }
+  
+  console.log("📱 Abrindo extensão:", url)
+  const popup = window.open(url, "_blank")
+  extensionWindowRef.current = popup
+
+  if (popup) {
+    console.log("✅ Extensão aberta com sucesso")
+    // NOVO: Marcar como aberta no localStorage
+    setExtensionOpen(true)
+    updateStatus("Extensão aberta em nova guia. Aguardando conexão...", "info")
+    
+  } else {
+    console.warn("🚫 Falha ao abrir a nova aba (popup bloqueado?)")
+    updateStatus("Não foi possível abrir a extensão. Verifique se o navegador bloqueou pop-ups.", "error")
+  }
+
+  const cleanup = (window as any).cleanup3CPlusExtension
+  if (cleanup) {
+    cleanup()
+  }
+
+  ;(window as any).cleanup3CPlusExtension = undefined
+}, [updateStatus, isExtensionOpen, setExtensionOpen])
+
+  // NOVO: Função principal de inicialização com controle via localStorage
+  const startConnection = useCallback(async () => {
+    const currentToken = token.trim() || localStorage.getItem("3c_api_token")
+    
+    if (!currentToken) {
       updateStatus("Token é obrigatório", "error")
       return
     }
 
-    if (socketRef.current) {
-      socketRef.current.removeAllListeners()
-      socketRef.current.disconnect()
-    }
-
-    setConnectionStatus("connecting")
-    console.log(`Guardando o api token`); /*teste*/ 
-    localStorage.setItem('api_token', tokenRef.current); /*teste*/
-    updateStatus("Conectando ao servidor...", "loading")
+    tokenRef.current = currentToken
+    localStorage.setItem("3c_api_token", currentToken)
 
     try {
-      const socket = io("https://socket.3c.plus", {
-        transports: ["websocket"],
-        query: { token: tokenRef.current },
-      })
+      setIsLoading(true)
+      updateStatus("Verificando status do operador...", "loading")
 
-      socketRef.current = socket
+      // 1. Conectar socket primeiro
+      connectSocket()
 
-      socket.onAny((event, data) => {
-        handleSocketEvent(event, data)
-      })
-
-      socket.on("connect", () => {
-        handleSocketEvent("connected", {})
-      })
-
-      socket.on("disconnect", (reason) => {
-        handleSocketEvent("disconnected", { reason })
-      })
-
-      socket.on("connect_error", (error) => {
-        updateStatus("Erro ao conectar. Verifique seu token.", "error")
-        setConnectionStatus("disconnected")
-      })
-    } catch (error) {
-      updateStatus("Erro ao criar conexão", "error")
-      setConnectionStatus("disconnected")
-    }
-  }, [handleSocketEvent, updateStatus])
-
-  const openExtension = useCallback(() => {
-    if (!tokenRef.current.trim()) {
-      updateStatus("Token é obrigatório", "error")
-      return
-    }
-
-    // Verificar se já existe um iframe da extensão
-    const existingIframe = document.getElementById("3c-plus-extension-iframe")
-    if (existingIframe) {
-      console.log("📱 Iframe da extensão já existe, reutilizando...")
-      updateStatus("Extensão já carregada. Aguarde a conexão...", "info")
-      return
-    }
-
-    // Criar iframe oculto para a extensão
-    const iframe = document.createElement("iframe")
-    iframe.id = "3c-plus-extension-iframe"
-    iframe.src = `https://app.3c.plus/extension?api_token=${encodeURIComponent(tokenRef.current)}`
-    iframe.setAttribute("allow", "microphone; autoplay")
-    iframe.style.display = "none" // Tornar invisível
-    iframe.style.width = "0px"
-    iframe.style.height = "0px"
-    iframe.style.border = "none"
-    iframe.style.position = "absolute"
-    iframe.style.top = "-9999px"
-    iframe.style.left = "-9999px"
-    
-    // Adicionar ao body da página
-    document.body.appendChild(iframe)
-    
-    console.log("📱 Iframe da extensão criado e adicionado à página")
-    updateStatus("Extensão carregada em segundo plano. Aguarde a conexão...", "info")
-
-    // Cleanup function para remover o iframe quando necessário
-    const cleanup = () => {
-      const iframeToRemove = document.getElementById("3c-plus-extension-iframe")
-      if (iframeToRemove) {
-        document.body.removeChild(iframeToRemove)
-        console.log("📱 Iframe da extensão removido")
-      }
-    }
-
-    // Armazenar a função de cleanup para uso posterior
-    ;(window as any).cleanup3CPlusExtension = cleanup
-  }, [updateStatus])
-
-  const startConnection = useCallback(() => {
-    openExtension()
-    connectSocket()
-
-    setTimeout(() => {
-      if (connectionStatusRef.current === "connected") {
-        fetchCampaigns()
+      // 2. NOVO: Só abrir extensão se não estiver marcada como aberta no localStorage
+      if (!isExtensionOpen()) {
+        console.log("🔧 Extensão não está aberta, abrindo...")
+        await openExtension()
       } else {
-        updateStatus("Não foi possível conectar à extensão. Verifique o token ou tente novamente.", "error")
+        console.log("✅ Extensão já está aberta (localStorage), apenas conectando socket")
+        updateStatus("Extensão já está aberta. Conectando...", "info")
+        
+        // Fazer POST para /agent/connect mesmo se extensão já estiver aberta
+        try {
+          const response = await fetch(
+            `https://app.3c.plus/api/v1/agent/connect?api_token=${encodeURIComponent(currentToken)}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" }
+            }
+          )
+
+          if (response.ok) {
+            console.log("📡 POST /agent/connect realizado com extensão já aberta")
+          } else {
+            console.log("❌ POST /agent/connect falhou - extensão pode estar fechada")
+            setExtensionOpen(false)
+            await openExtension()
+          }
+        } catch (error) {
+          console.log("❌ Erro no POST /agent/connect - reabrindo extensão")
+          setExtensionOpen(false)
+          await openExtension()
+        }
       }
-    }, 3000)
-  }, [openExtension, connectSocket, fetchCampaigns, updateStatus])
+
+      // 3. Aguardar evento 'agent-is-connected' por um tempo limite
+      updateStatus("Aguardando resposta do operador...", "loading")
+      
+      // Limpar timeout anterior se existir
+      if (agentConnectedTimeoutRef.current) {
+        clearTimeout(agentConnectedTimeoutRef.current)
+        agentConnectedTimeoutRef.current = null
+      }
+      
+      agentConnectedTimeoutRef.current = setTimeout(() => {
+        console.log("⏰ Timeout aguardando agent-is-connected")
+        if (connectionStatusRef.current !== "connected") {
+          updateStatus("Timeout aguardando conexão. Verifique se a extensão está funcionando.", "error")
+        }
+      }, 15000) // 15 segundos de timeout
+
+    } catch (error) {
+      console.error("❌ Erro na inicialização:", error)
+      updateStatus("Erro ao inicializar. Tente novamente.", "error")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [token, connectSocket, openExtension, updateStatus, isExtensionOpen, setExtensionOpen])
+
+  // NOVO: Inicialização automática melhorada
+  useEffect(() => {
+    const storedToken = localStorage.getItem("3c_api_token")
+    if (storedToken) {
+      setToken(storedToken)
+      tokenRef.current = storedToken
+      updateStatus("Verificando token armazenado...", "loading")
+      
+      // Usar setTimeout para evitar problemas de timing
+      const timeoutId = setTimeout(() => {
+        startConnection()
+      }, 500)
+      
+      return () => clearTimeout(timeoutId)
+    } else {
+      updateStatus("Insira um Token de Operador para começar", "info")
+    }
+  }, []) // Sem dependências para evitar loops
 
   useEffect(() => {
     return () => {
+      // Cleanup
       if (socketRef.current) {
         socketRef.current.removeAllListeners()
         socketRef.current.disconnect()
       }
       
-      // Cleanup do iframe da extensão quando o componente for desmontado
+      if (agentConnectedTimeoutRef.current) {
+        clearTimeout(agentConnectedTimeoutRef.current)
+      }
+      
+      if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
+        extensionWindowRef.current.close()
+      }
+      
+      // NOVO: Limpar localStorage na limpeza do componente
+      setExtensionOpen(false)
+      
       const cleanup = (window as any).cleanup3CPlusExtension
       if (cleanup) {
         cleanup()
       }
     }
-  }, [])
+  }, [setExtensionOpen])
 
   const getConnectionIcon = () => {
     switch (connectionStatus) {
@@ -760,7 +1130,7 @@ export default function ClickToCallSystem() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Phone className="h-5 w-5" />
-          3C Plus | Click-to-Call
+          Click-to-Call | 3C Plus 
           {getConnectionIcon()}
         </CardTitle>
         <CardDescription>{getStatusDescription()}</CardDescription>
@@ -776,7 +1146,7 @@ export default function ClickToCallSystem() {
           </Alert>
         )}
 
-                {connectionStatus === "disconnected" && (
+        {connectionStatus === "disconnected" && (
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="token">Token de Operador</Label>
