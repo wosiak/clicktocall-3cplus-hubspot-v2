@@ -916,7 +916,7 @@ const openExtension = useCallback(async () => {
   }
   
   console.log("📱 Abrindo extensão:", url)
-  const popup = window.open(url, "_blank")
+  const popup = window.open(url, "_blank", 'location=yes,height=300,width=300,scrollbars=yes,status=yes')
   extensionWindowRef.current = popup
 
   if (popup) {
