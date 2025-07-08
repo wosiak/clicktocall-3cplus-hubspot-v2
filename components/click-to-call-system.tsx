@@ -401,7 +401,7 @@ export default function ClickToCallSystem() {
     }
 
     const logoutAction = () => fetch(
-      `https://wosiak.3c.plus/api/v1/agent/logout?api_token=${encodeURIComponent(tokenRef.current)}`,
+      `https://app.3c.plus/api/v1/agent/logout?api_token=${encodeURIComponent(tokenRef.current)}`,
       { method: "POST" }
     )
 
