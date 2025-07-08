@@ -732,8 +732,22 @@ export default function ClickToCallSystem() {
           setSelectedQualification(null)
 
           // Store qualifications for when call is answered
-          const quals = data?.campaign?.dialer?.qualification_list?.qualifications || []
-          qualificationsRef.current = quals.map((q: any) => ({ id: q.id, name: q.name }))
+          const dialerQuals = data?.campaign?.dialer?.qualification_list?.qualifications ?? []
+          const extraQuals = data?.qualification?.qualifications ?? []
+
+          // Junta tudo e remove duplicatas por ID
+          const allQualsMap = new Map<number, { id: number; name: string }>()
+
+          dialerQuals.forEach((q: any) => {
+            allQualsMap.set(q.id, { id: q.id, name: q.name })
+          })
+          extraQuals.forEach((q: any) => {
+            if (!allQualsMap.has(q.id)) {
+              allQualsMap.set(q.id, { id: q.id, name: q.name })
+            }
+          })
+
+          qualificationsRef.current = Array.from(allQualsMap.values())
           updateStatus(`Ligação conectada: ${callData.phone}`, "success")
           break
 
