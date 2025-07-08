@@ -1127,13 +1127,42 @@ const openExtension = useCallback(async () => {
 
   return (
     <Card className="w-full max-w-2xl mx-auto">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Phone className="h-5 w-5" />
-          Click-to-Call | 3C Plus 
-          {getConnectionIcon()}
-        </CardTitle>
-        <CardDescription>{getStatusDescription()}</CardDescription>
+      <CardHeader className="text-center">
+        <div className="mt-2">{getConnectionIcon()}</div>
+        <div className="d-flex flex-column justify-content-center align-items-center">
+          <img
+            src="https://media.glassdoor.com/sqll/2841457/3c-plus-squareLogo-1662652407726.png"
+            alt="3C Plus Logo"
+            className="mx-auto"
+            style={{
+              height: "64px",
+              objectFit: "contain",
+              marginBottom: "0.4rem"
+            }}
+          />
+          <h1
+            className="fw-bold"
+            style={{
+              fontSize: "1.75rem",
+              marginBottom: "0.25rem",
+              letterSpacing: "-0.5px",
+              color: "#212529",
+              lineHeight: 1.2,
+              fontWeight: 700
+            }}
+          >
+            Click-to-Call
+          </h1>
+          <p
+            style={{
+              fontSize: "0.95rem",
+              color: "#6c757d",
+              whiteSpace: "nowrap"
+            }}
+          >
+            Utilize a <strong>3C Plus</strong> no <strong>Hubspot</strong> 
+          </p>
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-6">
