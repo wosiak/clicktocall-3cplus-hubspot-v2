@@ -376,6 +376,12 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   console.log("[HubSpot] Notifying call completed:", callData.phone, "with status:", callStatus, "and externalCallId:", externalCallId)
   console.log("[HubSpot] CallData completo recebido:", callData) // DEBUG ADICIONAL
   
+  // NOVO: Aguardar um pouco mais se o link da gravação ainda não estiver disponível
+  if (!callData.recordingLink || callData.recordingLink === 'undefined') {
+    console.log("[HubSpot] ⏳ Link da gravação não disponível, aguardando um pouco mais...")
+    await new Promise(resolve => setTimeout(resolve, 1000)) // Aguardar 1 segundo adicional
+  }
+  
   // Garante que o número para o HubSpot tenha o '+'
   let formattedPhoneNumberForHubspot = callData.phone
   if (!formattedPhoneNumberForHubspot.startsWith('+')) {
@@ -389,18 +395,18 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   console.log("[HubSpot] 🔍 Verificando recordingLink:", {
     recordingLink: callData.recordingLink,
     type: typeof callData.recordingLink,
-    hasValue: !!(callData.recordingLink && callData.recordingLink.trim())
+    hasValue: !!(callData.recordingLink && callData.recordingLink.trim() && callData.recordingLink !== 'undefined')
   })
   
   console.log("[HubSpot] 🔍 Verificando qualificationName:", {
     qualificationName: callData.qualificationName,
     type: typeof callData.qualificationName,
-    hasValue: !!(callData.qualificationName && callData.qualificationName.trim())
+    hasValue: !!(callData.qualificationName && callData.qualificationName.trim() && callData.qualificationName !== 'undefined')
   })
   
   // Verificar se temos link de gravação
   if (callData.recordingLink && callData.recordingLink.trim() && callData.recordingLink !== 'undefined') {
-    callBody += `\n<p><strong>Link da Gravação:</strong> <a href="${callData.recordingLink}" target="_blank">Clique aqui para fazer o download</a></p>`
+    callBody += `\n<p><strong>Link da Gravação:</strong> <a href="${callData.recordingLink}" target="_blank">Clique aqui para ouvir</a></p>`
     console.log("[HubSpot] ✅ Adicionando link de gravação:", callData.recordingLink)
   } else {
     console.log("[HubSpot] ⚠️ Nenhum link de gravação válido encontrado")

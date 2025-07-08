@@ -194,34 +194,59 @@ export default function ClickToCallSystem() {
   const finalizeCall = useCallback(async () => {
     console.log("🏁 Finalizing call with complete data")
     
-    // Aguardar um pouco para garantir que todos os dados estão disponíveis
-    await new Promise(resolve => setTimeout(resolve, 500))
-    
     const finalCallData = callDataRef.current
     if (!finalCallData) {
       console.error("❌ No call data available for finalization")
       return
     }
 
-    console.log("📊 Final call data:", finalCallData)
+    // NOVO: Aguardar o link da gravação se ainda não estiver disponível
+    if (!finalCallData.recordingLink) {
+      console.log("⏳ Aguardando link da gravação...")
+      let attempts = 0
+      const maxAttempts = 20 // 10 segundos (20 * 500ms)
+      
+      while (!callDataRef.current?.recordingLink && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+        attempts++
+        console.log(`⏳ Tentativa ${attempts}/${maxAttempts} - Aguardando link da gravação...`)
+      }
+      
+      // Atualizar finalCallData com os dados mais recentes após a espera
+      const updatedCallData = callDataRef.current
+      if (updatedCallData?.recordingLink) {
+        console.log("✅ Link da gravação obtido após espera:", updatedCallData.recordingLink)
+      } else {
+        console.warn("⚠️ Timeout: Link da gravação não disponível após espera.")
+      }
+    }
+    
+    // Usar os dados mais atuais do callDataRef após a espera
+    const finalCallDataWithRecording = callDataRef.current
+    if (!finalCallDataWithRecording) {
+      console.error("❌ No call data available after waiting for recording")
+      return
+    }
+
+    console.log("📊 Final call data:", finalCallDataWithRecording)
 
     // Notifica o HubSpot que a chamada foi completada
     const engagementData = selectedQualification ? {
       notes: `Chamada qualificada como: ${selectedQualification.name}`,
-      subject: `Chamada - ${finalCallData.phone}`,
+      subject: `Chamada - ${finalCallDataWithRecording.phone}`,
       qualification: selectedQualification
     } : undefined
     
     console.log("🔄 Enviando dados para notifyCallCompleted:", {
-      finalCallData,
+      finalCallDataWithRecording,
       engagementData,
       callStatus
     })
     
-    await notifyCallCompleted(finalCallData, engagementData, callStatus)
+    await notifyCallCompleted(finalCallDataWithRecording, engagementData, callStatus)
 
     // Show completion message
-    updateStatus(`Ligação finalizada: ${finalCallData.phone}. Pronto para nova ligação.`, "success")
+    updateStatus(`Ligação finalizada: ${finalCallDataWithRecording.phone}. Pronto para nova ligação.`, "success")
 
     // Reset to logged_in state (dial screen)
     setAgentStatus("logged_in")
