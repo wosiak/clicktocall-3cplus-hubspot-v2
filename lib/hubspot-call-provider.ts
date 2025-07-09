@@ -25,6 +25,19 @@ let dialingContext: any = null // Armazena o payload completo do onDialNumber
 let hubspotCallId: string | null = null
 let isInitialized: boolean = false
 
+// NOVO: Função para traduzir status da chamada para português
+export function translateCallStatus(status: string): string {
+  const statusTranslations: { [key: string]: string } = {
+    'COMPLETED': 'Ligação completada',
+    'NO_ANSWER': 'Ligação não-atendida', 
+    'FAILED': 'Ligação falhou',
+    'BUSY': 'Linha ocupada',
+    'CANCELED': 'Ligação cancelada'
+  }
+  
+  return statusTranslations[status] || status
+}
+
 export function initHubspotCallProvider(handlers: HubspotProviderHandlers) {
   if (typeof window === "undefined") return null
   if (hubspotInstance) return hubspotInstance
@@ -375,6 +388,7 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
 
   console.log("[HubSpot] Notifying call completed:", callData.phone, "with status:", callStatus, "and externalCallId:", externalCallId)
   console.log("[HubSpot] CallData completo recebido:", callData) // DEBUG ADICIONAL
+  console.log("[HubSpot] 🌐 Status traduzido:", callStatus, "→", translateCallStatus(callStatus)) // DEBUG TRADUÇÃO
   
   // NOVO: Aguardar um pouco mais se o link da gravação ainda não estiver disponível
   if (!callData.recordingLink || callData.recordingLink === 'undefined') {
@@ -389,7 +403,8 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   }
   
   // CORREÇÃO: Construir o hs_call_body com verificações mais robustas
-  let callBody = `<p><strong>Número:</strong> ${callData.phone}</p>\n<p><strong>Status:</strong> ${callStatus}</p>`
+  const translatedStatus = translateCallStatus(callStatus)
+  let callBody = `<p><strong>Número:</strong> ${callData.phone}</p>\n<p><strong>Status:</strong> ${translatedStatus}</p>`
   
   // CORREÇÃO: Verificações mais robustas para evitar valores undefined/null
   console.log("[HubSpot] 🔍 Verificando recordingLink:", {
@@ -406,7 +421,7 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   
   // Verificar se temos link de gravação
   if (callData.recordingLink && callData.recordingLink.trim() && callData.recordingLink !== 'undefined') {
-    callBody += `\n<p><strong>Link da Gravação:</strong> <a href="${callData.recordingLink}" target="_blank">Clique aqui para ouvir</a></p>`
+    callBody += `\n<p><strong>Link da Gravação:</strong> <a href="${callData.recordingLink}" target="_blank">Clique aqui para baixar</a></p>`
     console.log("[HubSpot] ✅ Adicionando link de gravação:", callData.recordingLink)
   } else {
     console.log("[HubSpot] ⚠️ Nenhum link de gravação válido encontrado")

@@ -18,6 +18,7 @@ import {
   notifyUserLoggedOut,
   notifyUserAvailable,
   sendError,
+  translateCallStatus,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
 import { disconnect } from "process"
@@ -810,17 +811,18 @@ export default function ClickToCallSystem() {
 
         case "call-was-finished":
           console.log("📞 Call was finished")
+          const completedStatus = "COMPLETED"
           setCallFinished(true)
-          setCallStatus("COMPLETED")
+          setCallStatus(completedStatus)
 
           if (!isCallQualified) {
             // Call ended but not qualified yet - show qualification options
-            updateStatus("Ligação finalizada. Selecione uma qualificação.", "info")
+            updateStatus(`${translateCallStatus(completedStatus)}. Selecione uma qualificação.`, "info")
             setAgentStatus("call_answered")
             setQualifications(qualificationsRef.current)
           } else {
             // Call ended and already qualified - useEffect will handle transition
-            updateStatus("Ligação finalizada.", "info")
+            updateStatus(translateCallStatus(completedStatus), "info")
           }
 
           setIsLoading(false) // Stop any loading states
@@ -828,7 +830,8 @@ export default function ClickToCallSystem() {
           break
 
         case "call-was-not-answered":
-          updateStatus("Ligação não foi atendida pelo cliente. Selecione uma qualificação.", "info")
+          const noAnswerStatus = "NO_ANSWER"
+          updateStatus(`${translateCallStatus(noAnswerStatus)}. Selecione uma qualificação.`, "info")
           
           // Notifica o HubSpot que a chamada foi finalizada (não atendida)
           if (callDataRef.current) {
@@ -840,11 +843,12 @@ export default function ClickToCallSystem() {
           setQualifications(qualificationsRef.current)
           setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
           setIsCallQualified(false) // Ainda não foi qualificada
-          setCallStatus("NO_ANSWER")
+          setCallStatus(noAnswerStatus)
           break
 
         case "call-was-failed":
-          updateStatus("Ligação falhou!", "info")
+          const failedStatus = "FAILED"
+          updateStatus(`${translateCallStatus(failedStatus)}. Selecione uma qualificação.`, "info")
           
           // Notifica o HubSpot que a chamada foi finalizada (falhou)
           if (callDataRef.current) {
@@ -856,7 +860,7 @@ export default function ClickToCallSystem() {
           setQualifications(qualificationsRef.current)
           setCallFinished(true) // Marcar como finalizada para não mostrar botão de hangup
           setIsCallQualified(false) // Ainda não foi qualificada
-          setCallStatus("FAILED")
+          setCallStatus(failedStatus)
           break
 
         case "call-history-was-created":
