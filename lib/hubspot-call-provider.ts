@@ -260,6 +260,12 @@ export async function notifyOutgoingCall(phoneNumber: string, externalCallId: st
 
   await waitForInitialization()
 
+  // Garante que somente a aba que recebeu onDialNumber (tem dialingContext) irá criar o engajamento
+  if (!dialingContext) {
+    console.warn("[HubSpot] Skipping outgoingCall: no dialingContext present (not the origin tab)")
+    return
+  }
+
   // Garante que o usuário está logado e disponível antes de iniciar chamada
   if (!isUserLoggedIn) {
     await notifyUserLoggedIn()
@@ -308,6 +314,12 @@ export async function notifyCallAnswered(callData: CallData) {
 
   await waitForInitialization()
 
+  // Evita múltiplas abas sinalizando a mesma chamada
+  if (!dialingContext) {
+    console.warn("[HubSpot] Skipping callAnswered: no dialingContext present (not the origin tab)")
+    return
+  }
+
   const externalCallId = callData.telephony_id
   if (!externalCallId) {
     console.error("[HubSpot] Cannot notify call answered - no valid externalCallId (telephony_id)")
@@ -341,6 +353,12 @@ export async function notifyCallEnded(callData: CallData) {
   }
 
   await waitForInitialization()
+
+  // Evita múltiplas abas sinalizando a mesma chamada
+  if (!dialingContext) {
+    console.warn("[HubSpot] Skipping callEnded: no dialingContext present (not the origin tab)")
+    return
+  }
 
   const externalCallId = callData.telephony_id
   if (!externalCallId) {
@@ -379,6 +397,12 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   }
 
   await waitForInitialization()
+
+  // Evita múltiplas abas sinalizando a mesma chamada
+  if (!dialingContext) {
+    console.warn("[HubSpot] Skipping callCompleted: no dialingContext present (not the origin tab)")
+    return
+  }
 
   const externalCallId = callData.telephony_id
   if (!externalCallId) {
@@ -492,6 +516,8 @@ export async function notifyCallCompleted(callData: CallData, engagementData?: a
   // Reset do engagement ID e do hubspotCallId após completar
   currentEngagementId = null
   hubspotCallId = null
+  // Limpa dialingContext para evitar que próximas chamadas em outras abas reutilizem este contexto
+  dialingContext = null
 }
 
 // Enviar erro para o HubSpot
