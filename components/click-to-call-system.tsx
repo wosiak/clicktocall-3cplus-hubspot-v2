@@ -7,6 +7,16 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { AlertCircle, CheckCircle, Phone, Loader2, Wifi, WifiOff } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { io, type Socket } from "socket.io-client"
 import { 
   initHubspotCallProvider, 
@@ -69,6 +79,9 @@ export default function ClickToCallSystem() {
   const [callFinished, setCallFinished] = useState(false)
   const [callStatus, setCallStatus] = useState<string>("COMPLETED")
 
+  const [showConflictModal, setShowConflictModal] = useState(false)
+  const [conflictToken, setConflictToken] = useState<string>("")
+
   // NOVO: Ref para armazenar dados da chamada de forma mais robusta
   const callDataRef = useRef<CallData | null>(null)
 
@@ -80,6 +93,7 @@ export default function ClickToCallSystem() {
   // NOVO: Refs para controlar o fluxo de conexão
   const agentConnectedTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const extensionWindowRef = useRef<Window | null>(null)
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   
 
   useEffect(() => {
@@ -141,10 +155,15 @@ export default function ClickToCallSystem() {
   const returnToDisconnectedState = useCallback(() => {
     console.log("🔄 Retornando ao estado desconectado")
     
-    // Limpar timeouts
+    // Limpar timeouts e intervalos
     if (agentConnectedTimeoutRef.current) {
       clearTimeout(agentConnectedTimeoutRef.current)
       agentConnectedTimeoutRef.current = null
+    }
+    
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current)
+      pingIntervalRef.current = null
     }
     
     // Desconectar socket
@@ -177,6 +196,13 @@ export default function ClickToCallSystem() {
       updateStatus("Insira um Token de Operador para começar", "info")
     }
   }, [resetAllState, updateStatus, setExtensionOpen])
+
+  const handleCloseConflictModal = useCallback(() => {
+    setShowConflictModal(false)
+    setConflictToken("")
+    updateStatus("Conexão cancelada. Usuário já conectado em outro lugar.", "info")
+    setIsLoading(false)
+  }, [updateStatus])
 
   // NOVO: Função para atualizar dados da chamada de forma mais robusta
   const updateCallData = useCallback((updates: Partial<CallData>) => {
@@ -266,6 +292,59 @@ export default function ClickToCallSystem() {
       finalizeCall()
     }
   }, [isCallQualified, callFinished, finalizeCall])
+
+  // NOVO: Sistema de ping automático a cada 55 segundos
+  useEffect(() => {
+    const doPing = async () => {
+      const currentToken = tokenRef.current
+      if (!currentToken) {
+        console.warn("⚠️ Ping cancelado - sem token")
+        return
+      }
+
+      try {
+        console.log("🏓 Enviando ping...")
+        const response = await fetch(
+          `https://app.3c.plus/api/v1/ping?api_token=${encodeURIComponent(currentToken)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+          }
+        )
+
+        if (response.ok) {
+          console.log("✅ Ping enviado com sucesso")
+        } else {
+          console.warn("⚠️ Ping falhou:", response.status)
+        }
+      } catch (error) {
+        console.error("❌ Erro ao enviar ping:", error)
+      }
+    }
+
+    if (connectionStatus === "connected") {
+      console.log("🏓 Iniciando sistema de ping (55s)")
+      
+      doPing()
+      
+      pingIntervalRef.current = setInterval(() => {
+        doPing()
+      }, 55000)
+    } else {
+      if (pingIntervalRef.current) {
+        console.log("🏓 Parando sistema de ping")
+        clearInterval(pingIntervalRef.current)
+        pingIntervalRef.current = null
+      }
+    }
+
+    return () => {
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current)
+        pingIntervalRef.current = null
+      }
+    }
+  }, [connectionStatus])
 
   // NOVO: Wrapper para chamadas de API com detecção de falhas e reabertura automática
   const apiCallWithErrorHandling = useCallback(async (
@@ -725,6 +804,52 @@ export default function ClickToCallSystem() {
           updateStatus("Operador foi desconectado. Clique em 'Conectar' para reconectar.", "info")
           break
 
+        // NOVO: Tratamento do evento force-logout
+        case "force-logout":
+          console.log("🔴 Force logout recebido - outra sessão assumiu o controle:", data)
+          
+          // Notificar HubSpot que usuário foi deslogado
+          notifyUserLoggedOut()
+          
+          // Fechar janela da extensão (WebRTC)
+          if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
+            console.log("🚪 Fechando extensão WebRTC")
+            extensionWindowRef.current.close()
+            extensionWindowRef.current = null
+          }
+          
+          // Desconectar socket
+          if (socketRef.current) {
+            console.log("🔌 Desconectando socket")
+            socketRef.current.removeAllListeners()
+            socketRef.current.disconnect()
+            socketRef.current = null
+          }
+          
+          // Marcar extensão como fechada
+          setExtensionOpen(false)
+          
+          // Limpar timeouts e intervalos
+          if (agentConnectedTimeoutRef.current) {
+            clearTimeout(agentConnectedTimeoutRef.current)
+            agentConnectedTimeoutRef.current = null
+          }
+          
+          if (pingIntervalRef.current) {
+            clearInterval(pingIntervalRef.current)
+            pingIntervalRef.current = null
+          }
+          
+          // Resetar todos os estados
+          setConnectionStatus("disconnected")
+          setAgentStatus("idle")
+          resetAllState()
+          
+          // Manter o token mas não reconectar automaticamente
+          updateStatus("Você foi desconectado. Seu usuário está conectado em outro lugar.", "error")
+          
+          break
+
         case "agent-entered-manual":
           setAgentStatus("logged_in")
           notifyUserLoggedIn()
@@ -981,7 +1106,75 @@ const openExtension = useCallback(async () => {
   ;(window as any).cleanup3CPlusExtension = undefined
 }, [updateStatus, isExtensionOpen, setExtensionOpen])
 
-  // NOVO: Função principal de inicialização com controle via localStorage
+  const handleForceLogoutAndConnect = useCallback(async () => {
+    console.log("🔄 Forçando logout de outra sessão...")
+    
+    try {
+      setIsLoading(true)
+      updateStatus("Desconectando outra sessão...", "loading")
+      
+      const response = await fetch(
+        `https://app.3c.plus/api/v1/forced-logout?api_token=${encodeURIComponent(conflictToken)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+
+      if (!response.ok) {
+        console.error("❌ Erro ao forçar logout:", response.status)
+        updateStatus("Erro ao desconectar outra sessão. Tente novamente.", "error")
+        setShowConflictModal(false)
+        setIsLoading(false)
+        return
+      }
+
+      console.log("✅ Logout forçado com sucesso")
+      setShowConflictModal(false)
+      
+      updateStatus("Outra sessão desconectada. Reconectando...", "success")
+      
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      
+      tokenRef.current = conflictToken
+      setToken(conflictToken)
+      
+      updateStatus("Validando token...", "loading")
+      
+      const authResponse = await fetch(
+        `https://app.3c.plus/api/v1/authenticate?check_conflict=1&api_token=${encodeURIComponent(conflictToken)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" }
+        }
+      )
+
+      if (!authResponse.ok) {
+        console.error("❌ Erro na revalidação:", authResponse.status)
+        updateStatus("Erro ao reconectar. Tente novamente.", "error")
+        setIsLoading(false)
+        return
+      }
+
+      console.log("✅ Token revalidado, conectando...")
+      updateStatus("Token validado! Conectando ao sistema...", "success")
+      
+      updateStatus("Verificando status do operador...", "loading")
+      
+      connectSocket()
+      
+      if (!isExtensionOpen()) {
+        await openExtension()
+      }
+      
+    } catch (error) {
+      console.error("❌ Erro ao forçar logout:", error)
+      updateStatus("Erro ao desconectar outra sessão.", "error")
+      setShowConflictModal(false)
+      setIsLoading(false)
+    }
+  }, [conflictToken, updateStatus, connectSocket, openExtension, isExtensionOpen])
+
   const startConnection = useCallback(async () => {
     const currentToken = token.trim() || localStorage.getItem("3c_api_token")
     
@@ -995,12 +1188,53 @@ const openExtension = useCallback(async () => {
 
     try {
       setIsLoading(true)
+      
+      updateStatus("Validando token...", "loading")
+      
+      try {
+        const authResponse = await fetch(
+          `https://app.3c.plus/api/v1/authenticate?check_conflict=1&api_token=${encodeURIComponent(currentToken)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+          }
+        )
+
+        if (!authResponse.ok) {
+          const errorData = await authResponse.json().catch(() => null)
+          
+          if (authResponse.status === 409 && errorData?.message === "Usuário já está logado") {
+            console.log("⚠️ Usuário já logado em outro lugar")
+            setConflictToken(currentToken)
+            setShowConflictModal(true)
+            updateStatus("Usuário já conectado em outro lugar", "info")
+            return
+          }
+          
+          console.error("❌ Token inválido:", authResponse.status, errorData)
+          updateStatus("Token inválido ou sem permissões. Verifique suas credenciais.", "error")
+          localStorage.removeItem("3c_api_token")
+          setToken("")
+          return
+        }
+
+        const authData = await authResponse.json()
+        console.log("✅ Token validado com sucesso:", authData)
+        updateStatus("Token validado! Conectando ao sistema...", "success")
+        
+      } catch (authError) {
+        console.error("❌ Erro ao validar token:", authError)
+        updateStatus("Erro ao validar token. Verifique sua conexão.", "error")
+        return
+      }
+
       updateStatus("Verificando status do operador...", "loading")
 
       // 1. Conectar socket primeiro
       connectSocket()
 
-      // 2. NOVO: Só abrir extensão se não estiver marcada como aberta no localStorage
+      // 2. NOVO: Só abrir extensão se não estiver \
+      // marcada como aberta no localStorage
       if (!isExtensionOpen()) {
         console.log("🔧 Extensão não está aberta, abrindo...")
         await openExtension()
@@ -1087,6 +1321,10 @@ const openExtension = useCallback(async () => {
         clearTimeout(agentConnectedTimeoutRef.current)
       }
       
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current)
+      }
+      
       if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
         extensionWindowRef.current.close()
       }
@@ -1169,7 +1407,28 @@ const openExtension = useCallback(async () => {
     (agentStatus === "in_call" || agentStatus === "call_answered" || agentStatus === "call_qualified")
 
   return (
-    <Card className="w-full max-w-2xl mx-auto">
+    <>
+      <AlertDialog open={showConflictModal} onOpenChange={setShowConflictModal}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Você já está conectado em outro lugar</AlertDialogTitle>
+            <AlertDialogDescription>
+              Seu usuário está conectado em outro computador ou outra aba do navegador. Clique em "Usar aqui" para encerrar outras sessões e logar nesta janela.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCloseConflictModal} disabled={isLoading}>
+              Fechar
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleForceLogoutAndConnect} disabled={isLoading}>
+              {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Usar aqui
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Card className="w-full max-w-2xl mx-auto">
       <CardHeader className="text-center">
         <div className="mt-2">{getConnectionIcon()}</div>
         <div className="d-flex flex-column justify-content-center align-items-center">
@@ -1331,5 +1590,6 @@ const openExtension = useCallback(async () => {
         )}
       </CardContent>
     </Card>
+    </>
   )
 }
