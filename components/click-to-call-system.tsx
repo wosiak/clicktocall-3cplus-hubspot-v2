@@ -1,27 +1,25 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { AlertCircle, CheckCircle, Phone, Loader2, Wifi, WifiOff } from "lucide-react"
+import { AlertCircle, CheckCircle, Phone, Loader2, Wifi, WifiOff, LogOut, PhoneOff, TriangleAlert } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { io, type Socket } from "socket.io-client"
-import { 
-  initHubspotCallProvider, 
-  notifyOutgoingCall, 
-  notifyCallAnswered, 
-  notifyCallEnded, 
+import {
+  initHubspotCallProvider,
+  notifyOutgoingCall,
+  notifyCallAnswered,
+  notifyCallEnded,
   notifyCallCompleted,
   notifyUserLoggedIn,
   notifyUserLoggedOut,
   notifyUserAvailable,
-  sendError,
   translateCallStatus,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
-import { disconnect } from "process"
 
 // Types
 interface Campaign {
@@ -38,6 +36,7 @@ interface CallData {
   id: string
   phone: string
   telephony_id: string
+  sid: string
   recordingLink?: string
   qualificationName?: string
 }
@@ -47,13 +46,12 @@ type AgentStatus = "idle" | "logged_in" | "dialing" | "in_call" | "call_answered
 
 interface StatusMessage {
   message: string
-  type: "success" | "error" | "info" | "loading"
+  type: "success" | "error" | "info" | "loading" | "warning"
 }
 
 export default function ClickToCallSystem() {
   const [token, setToken] = useState("")
   const [phoneNumber, setPhoneNumber] = useState("")
-  const [callSid, setCallSid] = useState<string>(''); /* Adicionado agora para guardar o Protocolo da Chamada*/
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected")
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle")
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
@@ -69,6 +67,9 @@ export default function ClickToCallSystem() {
   const [callFinished, setCallFinished] = useState(false)
   const [callStatus, setCallStatus] = useState<string>("COMPLETED")
 
+  // Track if there's an active call in another tab
+  const [isCallActiveInAnotherTab, setIsCallActiveInAnotherTab] = useState(false)
+
   // NOVO: Ref para armazenar dados da chamada de forma mais robusta
   const callDataRef = useRef<CallData | null>(null)
 
@@ -76,19 +77,39 @@ export default function ClickToCallSystem() {
   const tokenRef = useRef<string>("")
   const connectionStatusRef = useRef<ConnectionStatus>("disconnected")
   const qualificationsRef = useRef<Qualification[]>([])
-  
+  const phoneNumberRef = useRef<string>("")
+  const isCallQualifiedRef = useRef<boolean>(false)
+  const callFinishedRef = useRef<boolean>(false)
+  const isCallActiveInAnotherTabRef = useRef<boolean>(false)
+
   // NOVO: Refs para controlar o fluxo de conexão
   const agentConnectedTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const extensionWindowRef = useRef<Window | null>(null)
-  
+
 
   useEffect(() => {
     tokenRef.current = token
   }, [token])
 
   useEffect(() => {
+    phoneNumberRef.current = phoneNumber
+  }, [phoneNumber])
+
+  useEffect(() => {
     connectionStatusRef.current = connectionStatus
   }, [connectionStatus])
+
+  useEffect(() => {
+    isCallActiveInAnotherTabRef.current = isCallActiveInAnotherTab
+  }, [isCallActiveInAnotherTab])
+
+  useEffect(() => {
+    callFinishedRef.current = callFinished
+  }, [callFinished])
+
+  useEffect(() => {
+    isCallQualifiedRef.current = isCallQualified
+  }, [isCallQualified])
 
   // NOVO: Sincronizar callDataRef com activeCall
   useEffect(() => {
@@ -128,6 +149,9 @@ export default function ClickToCallSystem() {
     qualificationsRef.current = []
     setPhoneNumber("")
     setIsLoading(false)
+
+    // Reset call in another tab state
+    setIsCallActiveInAnotherTab(false)
   }, [])
 
   const resetAllState = useCallback(() => {
@@ -140,34 +164,34 @@ export default function ClickToCallSystem() {
   // NOVO: Função para retornar ao estado desconectado
   const returnToDisconnectedState = useCallback(() => {
     console.log("🔄 Retornando ao estado desconectado")
-    
+
     // Limpar timeouts
     if (agentConnectedTimeoutRef.current) {
       clearTimeout(agentConnectedTimeoutRef.current)
       agentConnectedTimeoutRef.current = null
     }
-    
+
     // Desconectar socket
     if (socketRef.current) {
       socketRef.current.removeAllListeners()
       socketRef.current.disconnect()
       socketRef.current = null
     }
-    
+
     // Fechar janela da extensão se estiver aberta
     if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
       extensionWindowRef.current.close()
       extensionWindowRef.current = null
     }
-    
+
     // Marcar extensão como fechada
     setExtensionOpen(false)
-    
+
     // Resetar estados
     setConnectionStatus("disconnected")
     setAgentStatus("idle")
     resetAllState()
-    
+
     // Carregar token do localStorage se existir
     const storedToken = localStorage.getItem("3c_api_token")
     if (storedToken) {
@@ -194,7 +218,7 @@ export default function ClickToCallSystem() {
   // NOVO: Função para finalizar chamada com dados completos
   const finalizeCall = useCallback(async () => {
     console.log("🏁 Finalizing call with complete data")
-    
+
     const finalCallData = callDataRef.current
     if (!finalCallData) {
       console.error("❌ No call data available for finalization")
@@ -206,13 +230,13 @@ export default function ClickToCallSystem() {
       console.log("⏳ Aguardando link da gravação...")
       let attempts = 0
       const maxAttempts = 20 // 10 segundos (20 * 500ms)
-      
+
       while (!callDataRef.current?.recordingLink && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, 500))
         attempts++
         console.log(`⏳ Tentativa ${attempts}/${maxAttempts} - Aguardando link da gravação...`)
       }
-      
+
       // Atualizar finalCallData com os dados mais recentes após a espera
       const updatedCallData = callDataRef.current
       if (updatedCallData?.recordingLink) {
@@ -221,7 +245,7 @@ export default function ClickToCallSystem() {
         console.warn("⚠️ Timeout: Link da gravação não disponível após espera.")
       }
     }
-    
+
     // Usar os dados mais atuais do callDataRef após a espera
     const finalCallDataWithRecording = callDataRef.current
     if (!finalCallDataWithRecording) {
@@ -237,13 +261,13 @@ export default function ClickToCallSystem() {
       subject: `Chamada - ${finalCallDataWithRecording.phone}`,
       qualification: selectedQualification
     } : undefined
-    
+
     console.log("🔄 Enviando dados para notifyCallCompleted:", {
       finalCallDataWithRecording,
       engagementData,
       callStatus
     })
-    
+
     await notifyCallCompleted(finalCallDataWithRecording, engagementData, callStatus)
 
     // Show completion message
@@ -276,26 +300,26 @@ export default function ClickToCallSystem() {
     try {
       console.log(`🔄 Executando ${actionName}...`)
       const response = await apiCall()
-      
+
       if (!response.ok) {
         console.error(`❌ ${actionName} falhou com status ${response.status}`)
-        
+
         // Se a resposta indica que a extensão não está conectada (ex: 401, 403, 500)
         if ([401, 403, 500, 502, 503].includes(response.status)) {
           console.log("🚨 Erro indica que extensão pode estar fechada - reabrindo...")
-          
+
           // Marcar extensão como fechada
           setExtensionOpen(false)
-          
+
           // Mostrar mensagem ao usuário
           updateStatus("Extensão desconectada. Reabrindo automaticamente...", "info")
-          
+
           // Reabrir extensão
           await openExtension()
-          
+
           // Aguardar um pouco para a extensão carregar
           await new Promise(resolve => setTimeout(resolve, 3000))
-          
+
           // Se há uma ação de retry, executá-la
           if (retryAction) {
             console.log(`🔄 Tentando ${actionName} novamente após reabrir extensão...`)
@@ -303,32 +327,32 @@ export default function ClickToCallSystem() {
           } else {
             updateStatus("Extensão reaberta. Tente a ação novamente.", "info")
           }
-          
+
           return null
         }
-        
+
         throw new Error(`HTTP ${response.status}`)
       }
-      
+
       console.log(`✅ ${actionName} executado com sucesso`)
       return response
-      
+
     } catch (error) {
       console.error(`❌ Erro em ${actionName}:`, error)
-      
+
       // Se é erro de rede, também tentar reabrir extensão
       if (error instanceof TypeError && error.message.includes('fetch')) {
         console.log("🚨 Erro de rede detectado - reabrindo extensão...")
         setExtensionOpen(false)
         updateStatus("Erro de conexão. Reabrindo extensão...", "info")
         await openExtension()
-        
+
         if (retryAction) {
           await new Promise(resolve => setTimeout(resolve, 3000))
           await retryAction()
         }
       }
-      
+
       return null
     }
   }, [updateStatus, setExtensionOpen])
@@ -357,7 +381,7 @@ export default function ClickToCallSystem() {
       updateStatus("Buscando campanhas...", "loading")
 
       const response = await apiCallWithErrorHandling(fetchAction, "buscar campanhas", retryAction)
-      
+
       if (response) {
         const data = await response.json()
         const campaignList = data?.data?.filter((c: any) => c.type === "campaign") || []
@@ -407,7 +431,6 @@ export default function ClickToCallSystem() {
         if (response) {
           localStorage.setItem("3c_api_token", tokenRef.current)
           setSelectedCampaign(campaign)
-          setCampaigns([])
           updateStatus("Login realizado com sucesso!", "success")
         }
       } catch (error) {
@@ -419,7 +442,7 @@ export default function ClickToCallSystem() {
     },
     [agentStatus, updateStatus, apiCallWithErrorHandling],
   )
-  
+
   const logoutFromCampaign = useCallback(async () => {
     if (!tokenRef.current.trim()) {
       updateStatus("Token é obrigatório", "error")
@@ -440,7 +463,6 @@ export default function ClickToCallSystem() {
       if (response) {
         // Notifica o HubSpot e limpa todo o estado
         notifyUserLoggedOut()
-        returnToDisconnectedState()
         updateStatus("Logout realizado com sucesso!", "success")
       }
     } catch (error) {
@@ -449,7 +471,7 @@ export default function ClickToCallSystem() {
     } finally {
       setIsLoading(false)
     }
-  }, [updateStatus, returnToDisconnectedState, apiCallWithErrorHandling])
+  }, [updateStatus, apiCallWithErrorHandling])
 
   const makeCall = useCallback(async (number?: string) => {
     // Se number for um objeto (evento de clique), ignorar e usar phoneNumber
@@ -459,11 +481,11 @@ export default function ClickToCallSystem() {
     } else {
       target = String(phoneNumber || "").trim()
     }
-    
+
     console.log("[3C Plus] makeCall - number param:", number, typeof number)
     console.log("[3C Plus] makeCall - phoneNumber state:", phoneNumber, typeof phoneNumber)
     console.log("[3C Plus] makeCall - target final:", target, typeof target)
-    
+
     /*if (!target || agentStatus !== "logged_in") {
       updateStatus("Insira um número válido", "error")
       return
@@ -496,7 +518,7 @@ export default function ClickToCallSystem() {
       updateStatus("Iniciando chamada...", "loading")
 
       const response = await apiCallWithErrorHandling(callAction, "iniciar chamada", retryAction)
-      
+
       if (response) {
         updateStatus(`Discando para ${target}...`, "info")
       } else {
@@ -546,10 +568,10 @@ export default function ClickToCallSystem() {
         if (response) {
           // Set selected qualification immediately for UI feedback
           setSelectedQualification(qualification)
-          
+
           // NOVO: Atualizar dados da chamada com qualificação
           updateCallData({ qualificationName: qualification.name })
-          
+
           updateStatus(`Qualificação usada: ${qualification.name}`, "success")
         }
       } catch (error) {
@@ -587,7 +609,7 @@ export default function ClickToCallSystem() {
       notifyCallEnded(activeCall)
 
       const response = await apiCallWithErrorHandling(hangupAction, "encerrar chamada", retryAction)
-      
+
       if (response) {
         updateStatus("Chamada encerrada com sucesso", "success")
       }
@@ -602,7 +624,7 @@ export default function ClickToCallSystem() {
     // Initialize HubSpot calling bridge - recreate whenever agentStatus changes
   useEffect(() => {
     console.log("[3C Plus] Reinicializando HubSpot provider com agentStatus:", agentStatus)
-    
+
     initHubspotCallProvider({
       dial: (num: string) => {
         console.log("[3C Plus] dial() chamado diretamente com:", num, typeof num)
@@ -616,10 +638,10 @@ export default function ClickToCallSystem() {
         console.log("[3C Plus] fillPhoneNumber recebido:", num, typeof num)
         const cleanNum = String(num).trim()
         console.log("[3C Plus] fillPhoneNumber limpo:", cleanNum, typeof cleanNum)
-        
+
         // Sempre atualizar o campo de input
         setPhoneNumber(cleanNum)
-        
+
         // Função para verificar status e discar - usando refs para ter valores mais atuais
         const checkStatusAndDial = () => {
           // Aguardar um pouco para garantir que os estados estão sincronizados
@@ -627,23 +649,23 @@ export default function ClickToCallSystem() {
             // Verificar o agentStatus atual usando callback do setState
             setAgentStatus(currentStatus => {
               console.log("[3C Plus] Status atual no momento da verificação:", currentStatus)
-              
+
               if (currentStatus === "logged_in" && cleanNum) {
                 console.log("[3C Plus] Agente logado e número válido - iniciando discagem automática")
                 updateStatus(`Número ${cleanNum} recebido do HubSpot. Discando automaticamente...`, "info")
-                
+
                 // Executar a chamada
                 makeCall(cleanNum)
               } else {
                 console.log(`[3C Plus] Agente não está logado (${currentStatus}) - número será discado quando fizer login`)
                 updateStatus(`Número ${cleanNum} preenchido pelo HubSpot. ${currentStatus !== "logged_in" ? "Aguardando login..." : "Clique em 'Discar' para iniciar a chamada."}`, "info")
               }
-              
+
               return currentStatus // Retornar o mesmo status sem alteração
             })
           }, 200)
         }
-        
+
         checkStatusAndDial()
       },
     })
@@ -658,7 +680,7 @@ export default function ClickToCallSystem() {
           setConnectionStatus("connected")
           updateStatus("Socket conectado! Verificando status do agente...", "success")
           notifyUserAvailable()
-          
+
           // NOVO: Fazer POST para /agent/connect automaticamente após socket conectar
           const currentToken = tokenRef.current
           if (currentToken) {
@@ -682,7 +704,7 @@ export default function ClickToCallSystem() {
         // NOVO: Tratamento do evento agent-is-connected
         case "agent-is-connected":
           console.log("🔗 Agent is connected event received:", data)
-          
+
           // Limpar timeout se existir
           if (agentConnectedTimeoutRef.current) {
             clearTimeout(agentConnectedTimeoutRef.current)
@@ -691,7 +713,7 @@ export default function ClickToCallSystem() {
 
           // Verificar o status do agente
           const agentStatus = data?.status
-          
+
           if (agentStatus === 0) {
             // Status 0: Operador precisa fazer login (escolher campanha)
             setConnectionStatus("connected")
@@ -715,20 +737,15 @@ export default function ClickToCallSystem() {
         // NOVO: Tratamento do evento agent-was-logged-out
         case "agent-was-logged-out":
           console.log("🚪 Agent was logged out event received:", data)
-          
-          // Marcar extensão como fechada no localStorage
-          setExtensionOpen(false)
-          
-          // Retornar ao estado desconectado
-          returnToDisconnectedState()
-          
-          updateStatus("Operador foi desconectado. Clique em 'Conectar' para reconectar.", "info")
+
+          setAgentStatus("idle")
+          updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
           break
 
         case "agent-entered-manual":
           setAgentStatus("logged_in")
           notifyUserLoggedIn()
-          const campaignId = data?.campaign_id
+          const campaignId = data?.campaignId
           const campaign = campaigns.find((c) => c.id === campaignId) || selectedCampaign
           updateStatus(
             campaign ? `Login realizado! Campanha: ${campaign.name}` : "Login realizado! Pronto para discar.",
@@ -739,49 +756,74 @@ export default function ClickToCallSystem() {
         case "call-was-connected":
           const callData: CallData = {
             id: data?.call?.id || "",
-            phone: data?.call?.phone || phoneNumber,
+            phone: data?.call?.phone || phoneNumberRef.current,
             telephony_id: data?.call?.telephony_id || "",
-            setCallSid: data?.call?.sid,
+            sid: data?.call?.sid,
           }
-          
-          setActiveCall(callData)
-          callDataRef.current = callData // NOVO: Atualizar ref imediatamente
-          setAgentStatus("in_call")
 
-          // Notifica o HubSpot que uma chamada está sendo iniciada APENAS AGORA
-          // O externalCallId é o telephony_id do 3C Plus
-          notifyOutgoingCall(callData.phone, callData.telephony_id)
+          // Verificar se a chamada foi iniciada nesta aba ou em outra
+          const currentPhoneNumber = phoneNumberRef.current.trim()
+          const incomingPhoneNumber = callData.phone.trim()
 
-          // Reset call completion states for new call
-          setIsCallQualified(false)
-          setCallFinished(false)
-          setSelectedQualification(null)
+          console.log("📞 Ligação conectada - verificando origem da ligação:")
 
-          // Store qualifications for when call is answered
-          const dialerQuals = data?.campaign?.dialer?.qualification_list?.qualifications ?? []
-          const extraQuals = data?.qualification?.qualifications ?? []
+          // Usar includes() para verificar se o número atual está contido no número recebido
+          // ou vice-versa, para lidar com diferentes formatações (com/sem código do país)
+          const isCallFromThisTab = currentPhoneNumber && (
+            incomingPhoneNumber.includes(currentPhoneNumber) ||
+            currentPhoneNumber.includes(incomingPhoneNumber)
+          )
 
-          // Junta tudo e remove duplicatas por ID
-          const allQualsMap = new Map<number, { id: number; name: string }>()
+          if (isCallFromThisTab) {
+            // Ligação foi iniciada nesta aba
+            console.log("✅ Ligação iniciada nesta aba")
+            setActiveCall(callData)
+            callDataRef.current = callData
+            setAgentStatus("in_call")
 
-          dialerQuals.forEach((q: any) => {
-            allQualsMap.set(q.id, { id: q.id, name: q.name })
-          })
-          extraQuals.forEach((q: any) => {
-            if (!allQualsMap.has(q.id)) {
+            // Reset call in another tab state
+            setIsCallActiveInAnotherTab(false)
+
+            // Notifica o HubSpot que uma chamada está sendo iniciada APENAS AGORA
+            notifyOutgoingCall(callData.phone, callData.telephony_id)
+
+            // Reset call completion states for new call
+            setIsCallQualified(false)
+            setCallFinished(false)
+            setSelectedQualification(null)
+
+            // Store qualifications for when call is answered
+            const dialerQuals = data?.campaign?.dialer?.qualification_list?.qualifications ?? []
+            const extraQuals = data?.qualification?.qualifications ?? []
+
+            // Junta tudo e remove duplicatas por ID
+            const allQualsMap = new Map<number, { id: number; name: string }>()
+
+            dialerQuals.forEach((q: any) => {
               allQualsMap.set(q.id, { id: q.id, name: q.name })
-            }
-          })
+            })
+            extraQuals.forEach((q: any) => {
+              if (!allQualsMap.has(q.id)) {
+                allQualsMap.set(q.id, { id: q.id, name: q.name })
+              }
+            })
 
-          qualificationsRef.current = Array.from(allQualsMap.values())
-          updateStatus(`Ligação conectada: ${callData.phone}`, "success")
+            qualificationsRef.current = Array.from(allQualsMap.values())
+            updateStatus(`Ligação conectada: ${callData.phone}`, "success")
+          } else {
+            // Chamada foi iniciada em outra aba
+            console.log("⚠️ Ligação iniciada em outra aba")
+            setIsCallActiveInAnotherTab(true)
+            updateStatus(`Chamada ativa em outra aba: ${incomingPhoneNumber}. Encerre a chamada para usar aqui.`, "warning")
+          }
           break
 
         case "manual-call-was-answered":
+          if (isCallActiveInAnotherTabRef.current) return;
           setAgentStatus("call_answered")
           setQualifications(qualificationsRef.current)
           updateStatus("Ligação atendida! Qualifique quando necessário.", "info")
-          
+
           // Notifica o HubSpot que a chamada foi atendida
           if (callDataRef.current) {
             notifyCallAnswered(callDataRef.current)
@@ -793,20 +835,30 @@ export default function ClickToCallSystem() {
           console.log("📞 Call was qualified")
           const qualificationUsed = data?.qualification || data?.call?.qualification
 
-          if (qualificationUsed) {
-            setSelectedQualification({ id: qualificationUsed.id, name: qualificationUsed.name })
-            
-            // NOVO: Usar updateCallData para atualizar de forma mais robusta
-            updateCallData({ qualificationName: qualificationUsed.name })
-            
-            updateStatus(``, "success")
-          } else {
-            updateStatus("Ligação qualificada com sucesso!", "success")
+          if (!isCallActiveInAnotherTabRef.current) {
+            if (qualificationUsed) {
+              setSelectedQualification({ id: qualificationUsed.id, name: qualificationUsed.name })
+
+              // NOVO: Usar updateCallData para atualizar de forma mais robusta
+              updateCallData({ qualificationName: qualificationUsed.name })
+
+              updateStatus(``, "success")
+            } else {
+              updateStatus("Ligação qualificada com sucesso!", "success")
+            }
           }
 
           setIsCallQualified(true)
           setAgentStatus("call_qualified")
           setIsLoading(false)
+
+          if (isCallActiveInAnotherTabRef.current && callFinishedRef.current) {
+            console.log("🔄 Ligação qualificada - resetando estado da outra aba")
+            setIsCallActiveInAnotherTab(false)
+            resetCallState()
+            setAgentStatus("logged_in")
+            updateStatus(`Pronto para discar!`, "success")
+          }
           break
 
         case "call-was-finished":
@@ -815,14 +867,16 @@ export default function ClickToCallSystem() {
           setCallFinished(true)
           setCallStatus(completedStatus)
 
-          if (!isCallQualified) {
-            // Call ended but not qualified yet - show qualification options
-            updateStatus(`${translateCallStatus(completedStatus)}. Selecione uma qualificação.`, "info")
-            setAgentStatus("call_answered")
-            setQualifications(qualificationsRef.current)
-          } else {
-            // Call ended and already qualified - useEffect will handle transition
-            updateStatus(translateCallStatus(completedStatus), "info")
+          if (!isCallActiveInAnotherTabRef.current) {
+            if (!isCallQualifiedRef.current) {
+              // Call ended but not qualified yet - show qualification options
+              updateStatus(`${translateCallStatus(completedStatus)}. Selecione uma qualificação.`, "info")
+              setAgentStatus("call_answered")
+              setQualifications(qualificationsRef.current)
+            } else {
+              // Call ended and already qualified - useEffect will handle transition
+              updateStatus(translateCallStatus(completedStatus), "info")
+            }
           }
 
           setIsLoading(false) // Stop any loading states
@@ -832,12 +886,12 @@ export default function ClickToCallSystem() {
         case "call-was-not-answered":
           const noAnswerStatus = "NO_ANSWER"
           updateStatus(`${translateCallStatus(noAnswerStatus)}. Selecione uma qualificação.`, "info")
-          
+
           // Notifica o HubSpot que a chamada foi finalizada (não atendida)
           if (callDataRef.current) {
             notifyCallEnded(callDataRef.current)
           }
-          
+
           // Definir como call_answered para mostrar as qualificações
           setAgentStatus("call_answered")
           setQualifications(qualificationsRef.current)
@@ -849,12 +903,12 @@ export default function ClickToCallSystem() {
         case "call-was-failed":
           const failedStatus = "FAILED"
           updateStatus(`${translateCallStatus(failedStatus)}. Selecione uma qualificação.`, "info")
-          
+
           // Notifica o HubSpot que a chamada foi finalizada (falhou)
           if (callDataRef.current) {
             notifyCallEnded(callDataRef.current)
           }
-          
+
           // Definindo como call_answered para mostrar as qualificações
           setAgentStatus("call_answered")
           setQualifications(qualificationsRef.current)
@@ -867,16 +921,25 @@ export default function ClickToCallSystem() {
           let recording_id = data.callHistory._id
           const recordingLink = `https://app.3c.plus/api/v1/calls/${recording_id}/recording`
           console.log(`Link da gravação: ${recordingLink}`)
-          
+
           // NOVO: Usar updateCallData para atualizar de forma mais robusta
           updateCallData({ recordingLink: recordingLink })
+
+          // Reset call in another tab state when call history is created
+          if (isCallActiveInAnotherTabRef.current && isCallQualifiedRef.current) {
+            console.log("🔄 Histórico de chamada criado - resetando estado da outra aba")
+            setIsCallActiveInAnotherTab(false)
+            resetCallState()
+            setAgentStatus("logged_in")
+            updateStatus(`Pronto para discar!`, "success")
+          }
           break
 
         case "agent-login-failed":
-          updateStatus("Login falhou! Cheque microfone + rede, recarregue a página e tente novamente!", "error")
-          returnToDisconnectedState()
+          updateStatus("Login falhou! Cheque microfone + rede, recarregue a página, verifique se o extension está aberto e tente novamente!", "error")
+          // returnToDisconnectedState()
           break
-        
+
         case "disconnected":
           updateStatus("Desconectado do servidor", "error")
           returnToDisconnectedState()
@@ -952,12 +1015,12 @@ const openExtension = useCallback(async () => {
   }
 
   const url = `https://app.3c.plus/extension?api_token=${encodeURIComponent(token)}`
-  
+
   // Fechar janela anterior se existir
   if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
     extensionWindowRef.current.close()
   }
-  
+
   console.log("📱 Abrindo extensão:", url)
   const popup = window.open(url, "_blank", 'location=yes,height=300,width=300,scrollbars=yes,status=yes')
   extensionWindowRef.current = popup
@@ -967,7 +1030,7 @@ const openExtension = useCallback(async () => {
     // NOVO: Marcar como aberta no localStorage
     setExtensionOpen(true)
     updateStatus("Extensão aberta em nova guia. Aguardando conexão...", "info")
-    
+
   } else {
     console.warn("🚫 Falha ao abrir a nova aba (popup bloqueado?)")
     updateStatus("Não foi possível abrir a extensão. Verifique se o navegador bloqueou pop-ups.", "error")
@@ -984,7 +1047,7 @@ const openExtension = useCallback(async () => {
   // NOVO: Função principal de inicialização com controle via localStorage
   const startConnection = useCallback(async () => {
     const currentToken = token.trim() || localStorage.getItem("3c_api_token")
-    
+
     if (!currentToken) {
       updateStatus("Token é obrigatório", "error")
       return
@@ -1007,7 +1070,7 @@ const openExtension = useCallback(async () => {
       } else {
         console.log("✅ Extensão já está aberta (localStorage), apenas conectando socket")
         updateStatus("Extensão já está aberta. Conectando...", "info")
-        
+
         // Fazer POST para /agent/connect mesmo se extensão já estiver aberta
         try {
           const response = await fetch(
@@ -1034,13 +1097,13 @@ const openExtension = useCallback(async () => {
 
       // 3. Aguardar evento 'agent-is-connected' por um tempo limite
       updateStatus("Aguardando resposta do operador...", "loading")
-      
+
       // Limpar timeout anterior se existir
       if (agentConnectedTimeoutRef.current) {
         clearTimeout(agentConnectedTimeoutRef.current)
         agentConnectedTimeoutRef.current = null
       }
-      
+
       agentConnectedTimeoutRef.current = setTimeout(() => {
         console.log("⏰ Timeout aguardando agent-is-connected")
         if (connectionStatusRef.current !== "connected") {
@@ -1063,12 +1126,12 @@ const openExtension = useCallback(async () => {
       setToken(storedToken)
       tokenRef.current = storedToken
       updateStatus("Verificando token armazenado...", "loading")
-      
+
       // Usar setTimeout para evitar problemas de timing
       const timeoutId = setTimeout(() => {
         startConnection()
       }, 500)
-      
+
       return () => clearTimeout(timeoutId)
     } else {
       updateStatus("Insira um Token de Operador para começar", "info")
@@ -1082,18 +1145,18 @@ const openExtension = useCallback(async () => {
         socketRef.current.removeAllListeners()
         socketRef.current.disconnect()
       }
-      
+
       if (agentConnectedTimeoutRef.current) {
         clearTimeout(agentConnectedTimeoutRef.current)
       }
-      
+
       if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
         extensionWindowRef.current.close()
       }
-      
+
       // NOVO: Limpar localStorage na limpeza do componente
       setExtensionOpen(false)
-      
+
       const cleanup = (window as any).cleanup3CPlusExtension
       if (cleanup) {
         cleanup()
@@ -1109,6 +1172,17 @@ const openExtension = useCallback(async () => {
         return <Loader2 className="h-4 w-4 animate-spin text-yellow-500" />
       default:
         return <WifiOff className="h-4 w-4 text-red-500" />
+    }
+  }
+
+  const getAlertVariant = () => {
+    switch (status.type) {
+      case "error":
+        return "destructive"
+      case "warning":
+        return "warning"
+      default:
+        return "default"
     }
   }
 
@@ -1152,7 +1226,7 @@ const openExtension = useCallback(async () => {
     activeCall !== null &&
     !isCallQualified &&
     qualifications.length > 0 &&
-    (agentStatus === "call_answered" || (callFinished && agentStatus === "call_answered"))
+    agentStatus === "call_answered"
 
   // Show hangup button when:
   // 1. There's an active call
@@ -1203,17 +1277,18 @@ const openExtension = useCallback(async () => {
               whiteSpace: "nowrap"
             }}
           >
-            Utilize a <strong>3C Plus</strong> no <strong>Hubspot</strong> 
+            Utilize a <strong>3C Plus</strong> no <strong>Hubspot</strong>
           </p>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-6">
         {status.message && (
-          <Alert variant={status.type === "error" ? "destructive" : "default"}>
+          <Alert variant={getAlertVariant()}>
             {status.type === "success" && <CheckCircle className="h-4 w-4" />}
             {status.type === "error" && <AlertCircle className="h-4 w-4" />}
             {status.type === "loading" && <Loader2 className="h-4 w-4 animate-spin" />}
+            {status.type === "warning" && <TriangleAlert className="h-4 w-4" />}
             <AlertDescription>{status.message}</AlertDescription>
           </Alert>
         )}
@@ -1235,11 +1310,11 @@ const openExtension = useCallback(async () => {
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Conectar
             </Button>
-            
+
           </div>
         )}
 
-        {connectionStatus === "connected" && campaigns.length > 0 && (
+        {agentStatus === "idle" && connectionStatus === "connected" && campaigns.length > 0 && (
           <div className="space-y-4">
             <h3 className="text-lg font-semibold">Campanhas Disponíveis</h3>
             <div className="grid gap-2">
@@ -1248,17 +1323,26 @@ const openExtension = useCallback(async () => {
                   key={campaign.id}
                   variant="outline"
                   onClick={() => loginToCampaign(campaign)}
-                  disabled={isLoading}
+                  disabled={isLoading || isCallActiveInAnotherTab}
                   className="justify-start"
                 >
                   {campaign.name}
                 </Button>
               ))}
             </div>
+            <Button
+              variant="destructive"
+              onClick={returnToDisconnectedState}
+              disabled={isLoading || isCallActiveInAnotherTab}
+              className="w-full"
+            >
+              <LogOut className="rotate-180" />
+              Desconectar
+            </Button>
           </div>
         )}
 
-        {agentStatus === "logged_in" && (
+        {(agentStatus === "logged_in" && !isCallActiveInAnotherTab) && (
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="phone">Digite o número desejado:</Label>
@@ -1271,13 +1355,13 @@ const openExtension = useCallback(async () => {
                 disabled={isLoading}
               />
             </div>
-            <Button onClick={() => makeCall()} disabled={!phoneNumber.trim() || isLoading} className="w-full">
+            <Button onClick={() => makeCall()} disabled={!phoneNumber.trim() || isLoading } className="w-full">
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
               Discar
             </Button>
             <Button
             onClick={logoutFromCampaign}
-            disabled={isLoading}
+            disabled={isLoading }
             variant="outline"   // ou "secondary", "ghost", o que fizer sentido pra você
             className="w-full"
           >
@@ -1294,7 +1378,7 @@ const openExtension = useCallback(async () => {
             <h3 className="text-lg font-semibold">Ligação Ativa</h3>
             <div className="space-y-2">
               <p><strong>Número:</strong> {activeCall?.phone}</p>
-              <p><strong>Protocolo:</strong> p-{activeCall?.setCallSid}</p>
+              <p><strong>Protocolo:</strong> p-{activeCall?.sid}</p>
               {/*<p><strong>ID:</strong> {activeCall?.id}</p>
               <p><strong>Telephony ID (HubSpot External Call ID):</strong> {activeCall?.telephony_id}</p>*/}
               {selectedQualification && (
@@ -1325,7 +1409,7 @@ const openExtension = useCallback(async () => {
 
         {showHangupButton && (
           <Button variant="destructive" onClick={hangupCall} disabled={isLoading} className="w-full">
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PhoneOff />}
             Encerrar Ligação
           </Button>
         )}
