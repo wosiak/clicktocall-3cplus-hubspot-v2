@@ -81,6 +81,7 @@ export default function ClickToCallSystem() {
   const isCallQualifiedRef = useRef<boolean>(false)
   const callFinishedRef = useRef<boolean>(false)
   const isCallActiveInAnotherTabRef = useRef<boolean>(false)
+  const campaignsRef = useRef<Campaign[]>([])
 
   // NOVO: Refs para controlar o fluxo de conexão
   const agentConnectedTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -110,6 +111,10 @@ export default function ClickToCallSystem() {
   useEffect(() => {
     isCallQualifiedRef.current = isCallQualified
   }, [isCallQualified])
+
+  useEffect(() => {
+    campaignsRef.current = campaigns
+  }, [campaigns])
 
   // NOVO: Sincronizar callDataRef com activeCall
   useEffect(() => {
@@ -740,6 +745,7 @@ export default function ClickToCallSystem() {
 
           setAgentStatus("idle")
           updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+          if (!campaignsRef.current.length) fetchCampaigns()
           break
 
         case "agent-entered-manual":
@@ -937,7 +943,7 @@ export default function ClickToCallSystem() {
 
         case "agent-login-failed":
           updateStatus("Login falhou! Cheque microfone + rede, recarregue a página, verifique se o extension está aberto e tente novamente!", "error")
-          // returnToDisconnectedState()
+          returnToDisconnectedState()
           break
 
         case "disconnected":
