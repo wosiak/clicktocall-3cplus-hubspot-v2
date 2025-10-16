@@ -166,6 +166,43 @@ export default function ClickToCallSystem() {
     resetCallState()
   }, [resetCallState])
 
+  // Função para tentar recuperar referência da janela do extension
+  const getExtensionWindowReference = useCallback((): Window | null => {
+    // Tenta usar a ref atual primeiro
+    if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
+      console.log("✅ Referência da extensão ainda válida")
+      return extensionWindowRef.current
+    }
+
+    // Tenta recuperar pelo nome salvo no localStorage
+    const savedWindowName = localStorage.getItem("3c_extension_window_name")
+
+    if (savedWindowName) {
+      try {
+        console.log("🔍 Tentando recuperar referência da extensão pelo nome:", savedWindowName)
+
+        // ✅ TRUQUE: window.open com URL vazia e nome existente retorna referência!
+        const existingWindow = window.open("", savedWindowName)
+
+        if (existingWindow && !existingWindow.closed) {
+          console.log("✅ Referência da extensão recuperada com sucesso!")
+          extensionWindowRef.current = existingWindow
+          return existingWindow
+        } else {
+          console.log("⚠️ Janela não existe mais ou foi fechada")
+          localStorage.removeItem("3c_extension_window_name")
+          localStorage.removeItem("3c_extension_open")
+          return null
+        }
+      } catch (error) {
+        console.warn("⚠️ Erro ao tentar recuperar referência:", error)
+        return null
+      }
+    }
+
+    return null
+  }, [])
+
   // NOVO: Função para retornar ao estado desconectado
   const returnToDisconnectedState = useCallback(() => {
     console.log("🔄 Retornando ao estado desconectado")
@@ -183,13 +220,23 @@ export default function ClickToCallSystem() {
       socketRef.current = null
     }
 
-    // Fechar janela da extensão se estiver aberta
-    if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
-      extensionWindowRef.current.close()
+    // ✅ NOVO: Tentar recuperar e fechar janela da extensão
+    const extensionWindow = getExtensionWindowReference()
+
+    if (extensionWindow) {
+      try {
+        extensionWindow.close()
+        console.log("✅ Extensão fechada com sucesso")
+      } catch (error) {
+        console.warn("⚠️ Erro ao fechar extensão:", error)
+      }
       extensionWindowRef.current = null
+    } else {
+      console.log("ℹ️ Extensão já foi fechada ou não estava aberta")
     }
 
-    // Marcar extensão como fechada
+    // Limpar localStorage
+    localStorage.removeItem("3c_extension_window_name")
     setExtensionOpen(false)
 
     // Resetar estados
@@ -205,7 +252,7 @@ export default function ClickToCallSystem() {
     } else {
       updateStatus("Insira um Token de Operador para começar", "info")
     }
-  }, [resetAllState, updateStatus, setExtensionOpen])
+  }, [resetAllState, updateStatus, setExtensionOpen, getExtensionWindowReference])
 
   // NOVO: Função para atualizar dados da chamada de forma mais robusta
   const updateCallData = useCallback((updates: Partial<CallData>) => {
@@ -1022,21 +1069,32 @@ const openExtension = useCallback(async () => {
 
   const url = `https://app.3c.plus/extension?api_token=${encodeURIComponent(token)}`
 
-  // Fechar janela anterior se existir
+  // ✅ NOVO: Usar nome único e persistente para a janela
+  const EXTENSION_WINDOW_NAME = `3cplus_extension_${token.substring(0, 10)}`
+
+  // Fechar janela anterior se existir (pela ref)
   if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
     extensionWindowRef.current.close()
   }
 
   console.log("📱 Abrindo extensão:", url)
-  const popup = window.open(url, "_blank", 'location=yes,height=300,width=300,scrollbars=yes,status=yes')
+
+  // ✅ Abre com nome específico - se já existir, retorna a referência!
+  const popup = window.open(
+    url,
+    EXTENSION_WINDOW_NAME, // Nome único
+    'location=yes,height=300,width=300,scrollbars=yes,status=yes'
+  )
+
   extensionWindowRef.current = popup
+
+  // ✅ NOVO: Salvar o nome da janela no localStorage
+  localStorage.setItem("3c_extension_window_name", EXTENSION_WINDOW_NAME)
 
   if (popup) {
     console.log("✅ Extensão aberta com sucesso")
-    // NOVO: Marcar como aberta no localStorage
     setExtensionOpen(true)
     updateStatus("Extensão aberta em nova guia. Aguardando conexão...", "info")
-
   } else {
     console.warn("🚫 Falha ao abrir a nova aba (popup bloqueado?)")
     updateStatus("Não foi possível abrir a extensão. Verifique se o navegador bloqueou pop-ups.", "error")
