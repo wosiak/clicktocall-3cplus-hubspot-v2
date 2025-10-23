@@ -5,8 +5,18 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { AlertCircle, CheckCircle, Phone, Loader2, Wifi, WifiOff, LogOut, PhoneOff, TriangleAlert } from "lucide-react"
+import { AlertCircle, CheckCircle, Phone, Loader2, Wifi, WifiOff, LogOut, PhoneOff, TriangleAlert, Mic, MicOff } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { io, type Socket } from "socket.io-client"
 import {
   initHubspotCallProvider,
@@ -54,6 +64,8 @@ export default function ClickToCallSystem() {
   const [phoneNumber, setPhoneNumber] = useState("")
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("disconnected")
   const [agentStatus, setAgentStatus] = useState<AgentStatus>("idle")
+  const [wasLoggedOutDuringCall, setWasLoggedOutDuringCall] = useState(false)
+  const [agentName, setAgentName] = useState<string>("")
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null)
   const [activeCall, setActiveCall] = useState<CallData | null>(null)
@@ -70,23 +82,43 @@ export default function ClickToCallSystem() {
   // Track if there's an active call in another tab
   const [isCallActiveInAnotherTab, setIsCallActiveInAnotherTab] = useState(false)
 
+  // Track if extension was closed and needs to be reopened
+  const [showReopenExtensionButton, setShowReopenExtensionButton] = useState(false)
+
+  // Track microphone mute status from extension
+  const [isMicrophoneMuted, setIsMicrophoneMuted] = useState(false)
+
+  // Track logout confirmation dialog
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false)
+
   // NOVO: Ref para armazenar dados da chamada de forma mais robusta
   const callDataRef = useRef<CallData | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
   const tokenRef = useRef<string>("")
   const connectionStatusRef = useRef<ConnectionStatus>("disconnected")
+  const agentStatusRef = useRef<AgentStatus>("idle")
   const qualificationsRef = useRef<Qualification[]>([])
   const phoneNumberRef = useRef<string>("")
   const isCallQualifiedRef = useRef<boolean>(false)
   const callFinishedRef = useRef<boolean>(false)
   const isCallActiveInAnotherTabRef = useRef<boolean>(false)
   const campaignsRef = useRef<Campaign[]>([])
+  const wasLoggedOutDuringCallRef = useRef<boolean>(false)
+  const isFinalizingCallRef = useRef<boolean>(false)
 
   // NOVO: Refs para controlar o fluxo de conexão
   const agentConnectedTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const extensionWindowRef = useRef<Window | null>(null)
 
+  // NOVO: Refs para BroadcastChannels
+  const extensionChannelRef = useRef<BroadcastChannel | null>(null)
+  const heartbeatChannelRef = useRef<BroadcastChannel | null>(null)
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const extensionIsOpenRef = useRef<boolean>(false)
+  const checkExtensionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastExtensionHeartbeatRef = useRef<number>(Date.now())
+  const extensionHeartbeatCheckRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     tokenRef.current = token
@@ -99,6 +131,10 @@ export default function ClickToCallSystem() {
   useEffect(() => {
     connectionStatusRef.current = connectionStatus
   }, [connectionStatus])
+
+  useEffect(() => {
+    agentStatusRef.current = agentStatus
+  }, [agentStatus])
 
   useEffect(() => {
     isCallActiveInAnotherTabRef.current = isCallActiveInAnotherTab
@@ -116,6 +152,10 @@ export default function ClickToCallSystem() {
     campaignsRef.current = campaigns
   }, [campaigns])
 
+  useEffect(() => {
+    wasLoggedOutDuringCallRef.current = wasLoggedOutDuringCall
+  }, [wasLoggedOutDuringCall])
+
   // NOVO: Sincronizar callDataRef com activeCall
   useEffect(() => {
     callDataRef.current = activeCall
@@ -125,22 +165,197 @@ export default function ClickToCallSystem() {
     setStatus({ message, type })
   }, [])
 
-  // NOVO: Funções para gerenciar estado da extensão no localStorage
-  const setExtensionOpen = useCallback((isOpen: boolean) => {
-    if (isOpen) {
-      localStorage.setItem("3c_extension_open", "true")
-      console.log("📱 Marcando extensão como aberta no localStorage")
-    } else {
-      localStorage.removeItem("3c_extension_open")
-      console.log("🚪 Removendo extensão do localStorage")
-    }
-  }, [])
+  // NOVO: Inicializar BroadcastChannels para comunicação com /extension
+  useEffect(() => {
+    const extensionChannel = new BroadcastChannel("extension-status")
+    const heartbeatChannel = new BroadcastChannel("extension-heartbeat")
 
-  const isExtensionOpen = useCallback(() => {
-    const isOpen = localStorage.getItem("3c_extension_open") === "true"
-    console.log(`🔍 Verificando extensão no localStorage: ${isOpen ? "ABERTA" : "FECHADA"}`)
-    return isOpen
-  }, [])
+    extensionChannelRef.current = extensionChannel
+    heartbeatChannelRef.current = heartbeatChannel
+
+    // Escutar eventos da extensão
+    extensionChannel.onmessage = (event) => {
+      console.log("📡 Mensagem recebida da extensão:", event.data)
+
+      switch (event.data.type) {
+        case "EXTENSION_OPENED":
+          console.log("✅ Extensão aberta detectada")
+          extensionIsOpenRef.current = true
+          if (checkExtensionTimeoutRef.current) {
+            clearTimeout(checkExtensionTimeoutRef.current)
+            checkExtensionTimeoutRef.current = null
+          }
+          updateStatus("Extensão já está aberta. Aguardando conexão...", "info")
+          break
+
+        case "EXTENSION_CONNECTED":
+          console.log("✅ Extensão conectada via SIP")
+          extensionIsOpenRef.current = true
+          updateStatus("Extensão conectada com sucesso", "success")
+          break
+
+        case "EXTENSION_CLOSED":
+          console.log("❌ Extensão foi fechada")
+          extensionIsOpenRef.current = false
+          extensionWindowRef.current = null
+          break
+
+        case "EXTENSION_REOPENED":
+          console.log("🔄 Extensão foi reaberta em outra aba")
+          extensionIsOpenRef.current = true
+          lastExtensionHeartbeatRef.current = Date.now()
+          setShowReopenExtensionButton(false)
+          updateStatus("Extensão reaberta", "success")
+          break
+
+        case "MICROPHONE_MUTED":
+          console.log("🔇 Microfone mutado")
+          setIsMicrophoneMuted(true)
+          break
+
+        case "MICROPHONE_UNMUTED":
+          console.log("🎤 Microfone ativo")
+          setIsMicrophoneMuted(false)
+          break
+
+        case "EXTENSION_STATUS_RESPONSE":
+          if (event.data.isOpen) {
+            console.log("✅ Extensão já está aberta (resposta)")
+            extensionIsOpenRef.current = true
+            if (checkExtensionTimeoutRef.current) {
+              clearTimeout(checkExtensionTimeoutRef.current)
+              checkExtensionTimeoutRef.current = null
+            }
+            if (event.data.isConnected) {
+              updateStatus("Extensão já conectada", "success")
+            }
+          }
+          break
+
+        case "AGENT_CONNECTED":
+          console.log("🔗 Agent conectado em outra aba:", event.data.status)
+
+          // Garantir que o token esteja carregado do localStorage
+          const storedToken = localStorage.getItem("3c_api_token")
+          if (storedToken && !tokenRef.current) {
+            console.log("🔐 Carregando token do localStorage para esta aba")
+            tokenRef.current = storedToken
+            setToken(storedToken)
+          }
+
+          // Conectar socket nesta aba também se não estiver conectado
+          if (!socketRef.current?.connected) {
+            connectSocket()
+          }
+
+          // Atualizar estado baseado no status recebido
+          const receivedStatus = event.data.status
+          if (receivedStatus === 0) {
+            setConnectionStatus("connected")
+            setAgentStatus("idle")
+            notifyUserAvailable()
+            // Não chamar fetchCampaigns aqui, aguardar o broadcast CAMPAIGNS_LOADED
+          } else if (receivedStatus === 4) {
+            setConnectionStatus("connected")
+            setAgentStatus("logged_in")
+            notifyUserLoggedIn()
+            updateStatus("Operador já está logado. Pronto para discar.", "success")
+          } else {
+            setConnectionStatus("connected")
+            updateStatus(`Operador conectado (status: ${receivedStatus}). Aguardando...`, "info")
+          }
+          break
+
+        case "CAMPAIGNS_LOADED":
+          console.log("📋 Campanhas recebidas via broadcast:", event.data.campaigns)
+          const receivedCampaigns = event.data.campaigns || []
+          setCampaigns(receivedCampaigns)
+          updateStatus(`${receivedCampaigns.length} campanhas encontradas. Escolha uma para fazer login.`, "success")
+          break
+
+        case "AGENT_LOGGED_OUT":
+          console.log("🚪 Agente deslogado em outra aba")
+          setAgentStatus("idle")
+          updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+          break
+
+        case "AGENT_LOGGED_OUT_DURING_CALL":
+          console.log("🚪 Agente deslogado durante chamada em outra aba")
+
+          // Marcar flag em TODAS as abas
+          setWasLoggedOutDuringCall(true)
+          wasLoggedOutDuringCallRef.current = true
+
+          // Se esta aba está logada mas não está em chamada, deslogar imediatamente
+          if (agentStatusRef.current === "logged_in") {
+            setAgentStatus("idle")
+            updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+          }
+          break
+
+        case "OPERATOR_LOGOUT":
+          console.log("🚪 Operador fez logout em outra aba")
+          // Remover token e retornar ao estado inicial
+          localStorage.removeItem("3c_api_token")
+          returnToDisconnectedState()
+          break
+      }
+    }
+
+    // Perguntar se extensão já está aberta (útil após F5)
+    console.log("🔍 Verificando se extensão já está aberta...")
+    extensionChannel.postMessage({ type: "CHECK_EXTENSION_STATUS" })
+
+    // Aguardar resposta por 500ms - se não receber, assumir que não está aberta
+    checkExtensionTimeoutRef.current = setTimeout(() => {
+      if (!extensionIsOpenRef.current) {
+        console.log("⏰ Timeout na verificação - extensão não está aberta")
+      }
+    }, 500)
+
+    // Escutar heartbeat do popup (detectar quando fecha)
+    heartbeatChannel.onmessage = (event) => {
+      if (event.data.type === "EXTENSION_ALIVE") {
+        lastExtensionHeartbeatRef.current = Date.now()
+      }
+    }
+
+    // Enviar heartbeat a cada 2 segundos
+    heartbeatIntervalRef.current = setInterval(() => {
+      heartbeatChannel.postMessage({
+        type: "CLICKTOCALL_ALIVE",
+        timestamp: Date.now(),
+      })
+    }, 800)
+
+    // Verificar heartbeat do popup a cada 3 segundos
+    extensionHeartbeatCheckRef.current = setInterval(() => {
+      const timeSinceLastHeartbeat = Date.now() - lastExtensionHeartbeatRef.current
+
+      // Se não receber heartbeat por 6 segundos, popup fechou
+      if (timeSinceLastHeartbeat > 3000 && extensionIsOpenRef.current) {
+        console.log("💔 Popup parou de enviar heartbeat - detectado como fechado")
+        extensionIsOpenRef.current = false
+        extensionWindowRef.current = null
+        setShowReopenExtensionButton(true)
+        updateStatus("Extensão foi fechada", "warning")
+      }
+    }, 800)
+
+    return () => {
+      if (heartbeatIntervalRef.current) {
+        clearInterval(heartbeatIntervalRef.current)
+      }
+      if (checkExtensionTimeoutRef.current) {
+        clearTimeout(checkExtensionTimeoutRef.current)
+      }
+      if (extensionHeartbeatCheckRef.current) {
+        clearInterval(extensionHeartbeatCheckRef.current)
+      }
+      extensionChannel.close()
+      heartbeatChannel.close()
+    }
+  }, [updateStatus])
 
   const resetCallState = useCallback(() => {
     console.log("🧹 Resetting call state completely")
@@ -154,6 +369,7 @@ export default function ClickToCallSystem() {
     qualificationsRef.current = []
     setPhoneNumber("")
     setIsLoading(false)
+    isFinalizingCallRef.current = false // Reset da flag de finalização
 
     // Reset call in another tab state
     setIsCallActiveInAnotherTab(false)
@@ -174,33 +390,27 @@ export default function ClickToCallSystem() {
       return extensionWindowRef.current
     }
 
-    // Tenta recuperar pelo nome salvo no localStorage
-    const savedWindowName = localStorage.getItem("3c_extension_window_name")
-
-    if (savedWindowName) {
-      try {
-        console.log("🔍 Tentando recuperar referência da extensão pelo nome:", savedWindowName)
-
-        // ✅ TRUQUE: window.open com URL vazia e nome existente retorna referência!
-        const existingWindow = window.open("", savedWindowName)
-
-        if (existingWindow && !existingWindow.closed) {
-          console.log("✅ Referência da extensão recuperada com sucesso!")
-          extensionWindowRef.current = existingWindow
-          return existingWindow
-        } else {
-          console.log("⚠️ Janela não existe mais ou foi fechada")
-          localStorage.removeItem("3c_extension_window_name")
-          localStorage.removeItem("3c_extension_open")
-          return null
-        }
-      } catch (error) {
-        console.warn("⚠️ Erro ao tentar recuperar referência:", error)
-        return null
-      }
-    }
-
+    console.log("⚠️ Referência da extensão não disponível")
     return null
+  }, [])
+
+  // NOVO: Função para fazer logout completo
+  const handleLogout = useCallback(() => {
+    console.log("🚪 Fazendo logout do operador")
+
+    // Remover token do localStorage
+    localStorage.removeItem("3c_api_token")
+    console.log("🗑️ Token removido do localStorage")
+
+    // Broadcast para outras abas
+    extensionChannelRef.current?.postMessage({
+      type: "OPERATOR_LOGOUT",
+      timestamp: Date.now(),
+    })
+    console.log("📢 Broadcast OPERATOR_LOGOUT enviado para outras abas")
+
+    // Chamar função de desconexão
+    returnToDisconnectedState()
   }, [])
 
   // NOVO: Função para retornar ao estado desconectado
@@ -235,9 +445,8 @@ export default function ClickToCallSystem() {
       console.log("ℹ️ Extensão já foi fechada ou não estava aberta")
     }
 
-    // Limpar localStorage
-    localStorage.removeItem("3c_extension_window_name")
-    setExtensionOpen(false)
+    // Resetar flag de extensão aberta
+    extensionIsOpenRef.current = false
 
     // Resetar estados
     setConnectionStatus("disconnected")
@@ -252,7 +461,7 @@ export default function ClickToCallSystem() {
     } else {
       updateStatus("Insira um Token de Operador para começar", "info")
     }
-  }, [resetAllState, updateStatus, setExtensionOpen, getExtensionWindowReference])
+  }, [resetAllState, updateStatus, getExtensionWindowReference])
 
   // NOVO: Função para atualizar dados da chamada de forma mais robusta
   const updateCallData = useCallback((updates: Partial<CallData>) => {
@@ -325,20 +534,38 @@ export default function ClickToCallSystem() {
     // Show completion message
     updateStatus(`Ligação finalizada: ${finalCallDataWithRecording.phone}. Pronto para nova ligação.`, "success")
 
-    // Reset to logged_in state (dial screen)
-    setAgentStatus("logged_in")
+    // Verificar se o agente foi deslogado durante a chamada usando o ref (valor mais atual)
+    const wasLoggedOut = wasLoggedOutDuringCallRef.current
 
-    // Reset call state after a brief delay to show the completion message
-    setTimeout(() => {
-      resetCallState()
-      updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
-    }, 1500)
+    if (wasLoggedOut) {
+      console.log("⚠️ Agente foi deslogado durante a chamada - retornando para tela de campanhas")
+      setAgentStatus("idle")
+
+      // Reset call state after a brief delay
+      setTimeout(() => {
+        resetCallState()
+        updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+        // Resetar flags apenas após tudo finalizar
+        setWasLoggedOutDuringCall(false)
+        wasLoggedOutDuringCallRef.current = false
+      }, 1500)
+    } else {
+      // Reset to logged_in state (dial screen) apenas se ainda estiver logado
+      setAgentStatus("logged_in")
+
+      // Reset call state after a brief delay to show the completion message
+      setTimeout(() => {
+        resetCallState()
+        updateStatus(`Pronto para nova ligação. Campanha: ${selectedCampaign?.name || "Ativa"}`, "success")
+      }, 1500)
+    }
   }, [selectedQualification, callStatus, updateStatus, resetCallState, selectedCampaign])
 
   // Watch for both conditions to be met and automatically transition to dial
   useEffect(() => {
-    if (isCallQualified && callFinished && callDataRef.current) {
+    if (isCallQualified && callFinished && callDataRef.current && !isFinalizingCallRef.current) {
       console.log("✅ Both qualification and call finished - finalizing call")
+      isFinalizingCallRef.current = true
       finalizeCall()
     }
   }, [isCallQualified, callFinished, finalizeCall])
@@ -359,9 +586,6 @@ export default function ClickToCallSystem() {
         // Se a resposta indica que a extensão não está conectada (ex: 401, 403, 500)
         if ([401, 403, 500, 502, 503].includes(response.status)) {
           console.log("🚨 Erro indica que extensão pode estar fechada - reabrindo...")
-
-          // Marcar extensão como fechada
-          setExtensionOpen(false)
 
           // Mostrar mensagem ao usuário
           updateStatus("Extensão desconectada. Reabrindo automaticamente...", "info")
@@ -395,7 +619,6 @@ export default function ClickToCallSystem() {
       // Se é erro de rede, também tentar reabrir extensão
       if (error instanceof TypeError && error.message.includes('fetch')) {
         console.log("🚨 Erro de rede detectado - reabrindo extensão...")
-        setExtensionOpen(false)
         updateStatus("Erro de conexão. Reabrindo extensão...", "info")
         await openExtension()
 
@@ -407,7 +630,7 @@ export default function ClickToCallSystem() {
 
       return null
     }
-  }, [updateStatus, setExtensionOpen])
+  }, [updateStatus])
 
   const fetchCampaigns = useCallback(async () => {
     if (!tokenRef.current || connectionStatusRef.current !== "connected") {
@@ -440,6 +663,13 @@ export default function ClickToCallSystem() {
 
         setCampaigns(campaignList)
         updateStatus(`${campaignList.length} campanhas encontradas. Escolha uma para fazer login.`, "success")
+
+        // Broadcast campanhas para outras abas
+        extensionChannelRef.current?.postMessage({
+          type: "CAMPAIGNS_LOADED",
+          campaigns: campaignList,
+          timestamp: Date.now(),
+        })
       }
     } catch (error) {
       console.error("❌ Error fetching campaigns:", error)
@@ -538,10 +768,10 @@ export default function ClickToCallSystem() {
     console.log("[3C Plus] makeCall - phoneNumber state:", phoneNumber, typeof phoneNumber)
     console.log("[3C Plus] makeCall - target final:", target, typeof target)
 
-    /*if (!target || agentStatus !== "logged_in") {
+    if (!target || agentStatus !== "logged_in") {
       updateStatus("Insira um número válido", "error")
       return
-    }*/
+    }
 
     const callAction = () => {
       const payload = { phone: target }
@@ -757,6 +987,11 @@ export default function ClickToCallSystem() {
         case "agent-is-connected":
           console.log("🔗 Agent is connected event received:", data)
 
+          // Capturar nome do agente
+          if (data?.agent?.name) {
+            setAgentName(data.agent.name)
+          }
+
           // Limpar timeout se existir
           if (agentConnectedTimeoutRef.current) {
             clearTimeout(agentConnectedTimeoutRef.current)
@@ -770,19 +1005,55 @@ export default function ClickToCallSystem() {
             // Status 0: Operador precisa fazer login (escolher campanha)
             setConnectionStatus("connected")
             setAgentStatus("idle")
-            updateStatus("Operador conectado. Escolha uma campanha para fazer login.", "success")
             notifyUserAvailable()
-            fetchCampaigns()
+
+            // Só buscar campanhas se ainda não tiver carregado
+            if (campaignsRef.current.length === 0) {
+              console.log("📋 Buscando campanhas pela primeira vez...")
+              updateStatus("Operador conectado. Buscando campanhas...", "loading")
+              fetchCampaigns()
+            } else {
+              console.log("📋 Campanhas já carregadas, reutilizando...")
+              updateStatus("Operador conectado. Escolha uma campanha para fazer login.", "success")
+
+              // Fazer broadcast das campanhas já carregadas para outras abas
+              extensionChannelRef.current?.postMessage({
+                type: "CAMPAIGNS_LOADED",
+                campaigns: campaignsRef.current,
+                timestamp: Date.now(),
+              })
+            }
+
+            // Broadcast para outras abas atualizarem
+            extensionChannelRef.current?.postMessage({
+              type: "AGENT_CONNECTED",
+              status: agentStatus,
+              timestamp: Date.now(),
+            })
           } else if (agentStatus === 4) {
             // Status 4: Operador já está logado (tela de discagem)
             setConnectionStatus("connected")
             setAgentStatus("logged_in")
             notifyUserLoggedIn()
             updateStatus("Operador já está logado. Pronto para discar.", "success")
+
+            // Broadcast para outras abas atualizarem
+            extensionChannelRef.current?.postMessage({
+              type: "AGENT_CONNECTED",
+              status: agentStatus,
+              timestamp: Date.now(),
+            })
           } else {
             // Outros status - tratar como conectado mas aguardando
             setConnectionStatus("connected")
             updateStatus(`Operador conectado (status: ${agentStatus}). Aguardando...`, "info")
+
+            // Broadcast para outras abas atualizarem
+            extensionChannelRef.current?.postMessage({
+              type: "AGENT_CONNECTED",
+              status: agentStatus,
+              timestamp: Date.now(),
+            })
           }
           break
 
@@ -790,13 +1061,37 @@ export default function ClickToCallSystem() {
         case "agent-was-logged-out":
           console.log("🚪 Agent was logged out event received:", data)
 
-          setAgentStatus("idle")
-          updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
-          if (!campaignsRef.current.length) fetchCampaigns()
+          // Verificar se está em uma chamada ativa
+          const isInActiveCall = ["dialing", "in_call", "call_answered", "call_qualified"].includes(agentStatusRef.current)
+
+          if (isInActiveCall) {
+            console.log("⚠️ Agente deslogado durante chamada ativa - marcando flag")
+            setWasLoggedOutDuringCall(true)
+            wasLoggedOutDuringCallRef.current = true
+
+            // Broadcast para outras abas atualizarem
+            extensionChannelRef.current?.postMessage({
+              type: "AGENT_LOGGED_OUT_DURING_CALL",
+              timestamp: Date.now(),
+            })
+            // Não mudar o agentStatus aqui, deixar o fluxo da chamada continuar
+          } else {
+            // Deslogar normalmente se não estiver em chamada
+            setAgentStatus("idle")
+            updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+            if (!campaignsRef.current.length) fetchCampaigns()
+
+            // Broadcast para outras abas atualizarem
+            extensionChannelRef.current?.postMessage({
+              type: "AGENT_LOGGED_OUT",
+              timestamp: Date.now(),
+            })
+          }
           break
 
         case "agent-entered-manual":
           setAgentStatus("logged_in")
+          setWasLoggedOutDuringCall(false) // Reset flag ao logar com sucesso
           notifyUserLoggedIn()
           const campaignId = data?.campaignId
           const campaign = campaigns.find((c) => c.id === campaignId) || selectedCampaign
@@ -909,8 +1204,15 @@ export default function ClickToCallSystem() {
             console.log("🔄 Ligação qualificada - resetando estado da outra aba")
             setIsCallActiveInAnotherTab(false)
             resetCallState()
-            setAgentStatus("logged_in")
-            updateStatus(`Pronto para discar!`, "success")
+
+            // Verificar se foi deslogado antes de retornar para logged_in
+            if (!wasLoggedOutDuringCallRef.current) {
+              setAgentStatus("logged_in")
+              updateStatus(`Pronto para discar!`, "success")
+            } else {
+              setAgentStatus("idle")
+              updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+            }
           }
           break
 
@@ -983,8 +1285,15 @@ export default function ClickToCallSystem() {
             console.log("🔄 Histórico de chamada criado - resetando estado da outra aba")
             setIsCallActiveInAnotherTab(false)
             resetCallState()
-            setAgentStatus("logged_in")
-            updateStatus(`Pronto para discar!`, "success")
+
+            // Verificar se foi deslogado antes de retornar para logged_in
+            if (!wasLoggedOutDuringCallRef.current) {
+              setAgentStatus("logged_in")
+              updateStatus(`Pronto para discar!`, "success")
+            } else {
+              setAgentStatus("idle")
+              updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+            }
           }
           break
 
@@ -1002,7 +1311,7 @@ export default function ClickToCallSystem() {
           console.log("🔍 Unhandled socket event:", event, data)
       }
     },
-    [campaigns, selectedCampaign, phoneNumber, isCallQualified, fetchCampaigns, updateStatus, returnToDisconnectedState, updateCallData, setExtensionOpen],
+    [campaigns, selectedCampaign, phoneNumber, isCallQualified, fetchCampaigns, updateStatus, returnToDisconnectedState, updateCallData],
   )
 
   const connectSocket = useCallback(() => {
@@ -1052,7 +1361,7 @@ export default function ClickToCallSystem() {
   }
 }, [handleSocketEvent, updateStatus, returnToDisconnectedState])
 
-// NOVO: Função openExtension com controle via localStorage
+// NOVO: Função openExtension com controle via BroadcastChannel
 const openExtension = useCallback(async () => {
   const token = tokenRef.current?.trim()
   if (!token) {
@@ -1060,16 +1369,34 @@ const openExtension = useCallback(async () => {
     return
   }
 
-  // NOVO: Verificar se extensão já está aberta via localStorage
-  if (isExtensionOpen()) {
-    console.log("🚫 Extensão já está aberta (localStorage), não abrindo novamente")
+  // Verificar se popup ref ainda está aberta
+  if (extensionWindowRef.current && !extensionWindowRef.current.closed) {
+    console.log("🚫 Extensão já está aberta (ref válida), não abrindo novamente")
     updateStatus("Extensão já está aberta. Aguardando conexão...", "info")
     return
   }
 
-  const url = `https://app.3c.plus/extension?api_token=${encodeURIComponent(token)}`
+  // Verificar se extensão já está aberta via BroadcastChannel
+  if (extensionIsOpenRef.current) {
+    // Fazer double check via BroadcastChannel
+    console.log("🔍 Verificando status da extensão via BroadcastChannel...")
+    extensionChannelRef.current?.postMessage({ type: "CHECK_EXTENSION_STATUS" })
 
-  // ✅ NOVO: Usar nome único e persistente para a janela
+    // Aguardar resposta por 300ms
+    await new Promise(resolve => setTimeout(resolve, 300))
+
+    // Se ainda marcar como aberta, não abrir
+    if (extensionIsOpenRef.current) {
+      console.log("🚫 Extensão confirmada como aberta, não abrindo novamente")
+      updateStatus("Extensão já está aberta. Aguardando conexão...", "info")
+      return
+    }
+  }
+
+  // ✅ MUDANÇA: Usar rota local /extension (same-origin)
+  const url = `/extension?api_token=${encodeURIComponent(token)}`
+
+  // ✅ Usar nome único e persistente para a janela
   const EXTENSION_WINDOW_NAME = `3cplus_extension_${token.substring(0, 10)}`
 
   // Fechar janela anterior se existir (pela ref)
@@ -1079,34 +1406,41 @@ const openExtension = useCallback(async () => {
 
   console.log("📱 Abrindo extensão:", url)
 
-  // ✅ Abre com nome específico - se já existir, retorna a referência!
+  // ✅ Abre com nome específico
   const popup = window.open(
     url,
-    EXTENSION_WINDOW_NAME, // Nome único
-    'location=yes,height=300,width=300,scrollbars=yes,status=yes'
+    EXTENSION_WINDOW_NAME,
+    'location=yes,height=150,width=400,scrollbars=yes,status=yes'
   )
 
   extensionWindowRef.current = popup
 
-  // ✅ NOVO: Salvar o nome da janela no localStorage
-  localStorage.setItem("3c_extension_window_name", EXTENSION_WINDOW_NAME)
-
   if (popup) {
     console.log("✅ Extensão aberta com sucesso")
-    setExtensionOpen(true)
+    extensionIsOpenRef.current = true
+    lastExtensionHeartbeatRef.current = Date.now() // Reset heartbeat timer
+    setShowReopenExtensionButton(false) // Hide reopen button
     updateStatus("Extensão aberta em nova guia. Aguardando conexão...", "info")
+
+    // Notificar outras abas que extensão foi reaberta
+    extensionChannelRef.current?.postMessage({
+      type: "EXTENSION_REOPENED",
+      timestamp: Date.now(),
+    })
+
+    // Enviar token para validação
+    setTimeout(() => {
+      extensionChannelRef.current?.postMessage({
+        type: "TOKEN_VALIDATION",
+        token: token,
+        timestamp: Date.now(),
+      })
+    }, 500) // Delay para garantir que extension está pronta para receber
   } else {
     console.warn("🚫 Falha ao abrir a nova aba (popup bloqueado?)")
     updateStatus("Não foi possível abrir a extensão. Verifique se o navegador bloqueou pop-ups.", "error")
   }
-
-  const cleanup = (window as any).cleanup3CPlusExtension
-  if (cleanup) {
-    cleanup()
-  }
-
-  ;(window as any).cleanup3CPlusExtension = undefined
-}, [updateStatus, isExtensionOpen, setExtensionOpen])
+}, [updateStatus])
 
   // NOVO: Função principal de inicialização com controle via localStorage
   const startConnection = useCallback(async () => {
@@ -1127,37 +1461,17 @@ const openExtension = useCallback(async () => {
       // 1. Conectar socket primeiro
       connectSocket()
 
-      // 2. NOVO: Só abrir extensão se não estiver marcada como aberta no localStorage
-      if (!isExtensionOpen()) {
-        console.log("🔧 Extensão não está aberta, abrindo...")
-        await openExtension()
-      } else {
-        console.log("✅ Extensão já está aberta (localStorage), apenas conectando socket")
-        updateStatus("Extensão já está aberta. Conectando...", "info")
+      // 2. Abrir extensão (BroadcastChannel detectará se já está aberta)
+      console.log("🔧 Abrindo extensão...")
+      await openExtension()
 
-        // Fazer POST para /agent/connect mesmo se extensão já estiver aberta
-        try {
-          const response = await fetch(
-            `https://app.3c.plus/api/v1/agent/connect?api_token=${encodeURIComponent(currentToken)}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" }
-            }
-          )
-
-          if (response.ok) {
-            console.log("📡 POST /agent/connect realizado com extensão já aberta")
-          } else {
-            console.log("❌ POST /agent/connect falhou - extensão pode estar fechada")
-            setExtensionOpen(false)
-            await openExtension()
-          }
-        } catch (error) {
-          console.log("❌ Erro no POST /agent/connect - reabrindo extensão")
-          setExtensionOpen(false)
-          await openExtension()
-        }
-      }
+      // 2.5. Enviar token para validação no extension
+      console.log("🔐 Enviando token para validação...")
+      extensionChannelRef.current?.postMessage({
+        type: "TOKEN_VALIDATION",
+        token: currentToken,
+        timestamp: Date.now(),
+      })
 
       // 3. Aguardar evento 'agent-is-connected' por um tempo limite
       updateStatus("Aguardando resposta do operador...", "loading")
@@ -1181,7 +1495,7 @@ const openExtension = useCallback(async () => {
     } finally {
       setIsLoading(false)
     }
-  }, [token, connectSocket, openExtension, updateStatus, isExtensionOpen, setExtensionOpen])
+  }, [token, connectSocket, openExtension, updateStatus])
 
   // NOVO: Inicialização automática melhorada
   useEffect(() => {
@@ -1218,15 +1532,12 @@ const openExtension = useCallback(async () => {
         extensionWindowRef.current.close()
       }
 
-      // NOVO: Limpar localStorage na limpeza do componente
-      setExtensionOpen(false)
-
       const cleanup = (window as any).cleanup3CPlusExtension
       if (cleanup) {
         cleanup()
       }
     }
-  }, [setExtensionOpen])
+  }, [])
 
   const getConnectionIcon = () => {
     switch (connectionStatus) {
@@ -1248,39 +1559,6 @@ const openExtension = useCallback(async () => {
       default:
         return "default"
     }
-  }
-
-  const getStatusDescription = () => {
-    if (connectionStatus === "disconnected") {
-      return ""
-    }
-    if (connectionStatus === "connecting") {
-      return "Conectando..."
-    }
-    if (connectionStatus === "connected" && campaigns.length > 0) {
-      return "Escolha uma campanha para fazer login"
-    }
-    if (agentStatus === "logged_in") {
-      return `Campanha: ${selectedCampaign?.name || "Ativa"}`
-    }
-    if (agentStatus === "dialing") {
-      return "Discando..."
-    }
-    if (agentStatus === "in_call") {
-      return "Ligação conectada - Aguardando atendimento"
-    }
-    if (agentStatus === "call_answered") {
-      if (callFinished && !isCallQualified) {
-        return "Ligação finalizada - Selecione uma qualificação"
-      }
-      return isCallQualified
-        ? "Ligação qualificada - Pode encerrar quando quiser"
-        : ""
-    }
-    if (agentStatus === "call_qualified") {
-      return `Qualificada: ${selectedQualification?.name || "Sucesso"}`
-    }
-    return "Aguardando..."
   }
 
   // Show qualification buttons when:
@@ -1309,7 +1587,30 @@ const openExtension = useCallback(async () => {
   return (
     <Card className="w-full max-w-2xl mx-auto">
       <CardHeader className="text-center">
-        <div className="mt-2">{getConnectionIcon()}</div>
+        <div className="mt-2 flex items-center gap-3">
+          {connectionStatus === "connected" && agentName && (
+            <>
+              <button
+                onClick={() => setShowLogoutDialog(true)}
+                className="flex items-center gap-2 hover:opacity-70 transition-opacity"
+                title="Desconectar"
+              >
+                <LogOut className="h-4 w-4 text-gray-600 transform scale-x-[-1]" />
+                <span className="text-sm font-medium text-gray-700">{agentName}</span>
+              </button>
+            </>
+          )}
+          {getConnectionIcon()}
+          {(agentStatus === "logged_in" || agentStatus === "dialing" || agentStatus === "in_call" || agentStatus === "call_answered" || agentStatus === "call_qualified") && !isCallActiveInAnotherTab && (
+            <div className="flex items-center gap-1">
+              {isMicrophoneMuted ? (
+                <MicOff className="h-4 w-4 text-red-500" />
+              ) : (
+                <Mic className="h-4 w-4 text-green-500" />
+              )}
+            </div>
+          )}
+        </div>
         <div className="d-flex flex-column justify-content-center align-items-center">
           <img
             src="https://media.glassdoor.com/sqll/2841457/3c-plus-squareLogo-1662652407726.png"
@@ -1357,6 +1658,17 @@ const openExtension = useCallback(async () => {
           </Alert>
         )}
 
+        {showReopenExtensionButton && (
+          <Button
+            onClick={openExtension}
+            disabled={isLoading}
+            className="w-full bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 hover:from-orange-600 hover:via-red-600 hover:to-pink-600 text-white font-bold shadow-lg animate-pulse"
+          >
+            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Phone className="mr-2 h-4 w-4" />}
+            Abrir Extensão
+          </Button>
+        )}
+
         {connectionStatus === "disconnected" && (
           <div className="space-y-4">
             <div className="space-y-2">
@@ -1387,22 +1699,13 @@ const openExtension = useCallback(async () => {
                   key={campaign.id}
                   variant="outline"
                   onClick={() => loginToCampaign(campaign)}
-                  disabled={isLoading || isCallActiveInAnotherTab}
+                  disabled={isLoading || isCallActiveInAnotherTab || showReopenExtensionButton}
                   className="justify-start"
                 >
                   {campaign.name}
                 </Button>
               ))}
             </div>
-            <Button
-              variant="destructive"
-              onClick={returnToDisconnectedState}
-              disabled={isLoading || isCallActiveInAnotherTab}
-              className="w-full"
-            >
-              <LogOut className="rotate-180" />
-              Desconectar
-            </Button>
           </div>
         )}
 
@@ -1416,6 +1719,11 @@ const openExtension = useCallback(async () => {
                 placeholder="Ex: 5511999998888"
                 value={phoneNumber}
                 onChange={(e) => setPhoneNumber(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && phoneNumber.trim() && !isLoading) {
+                    makeCall()
+                  }
+                }}
                 disabled={isLoading}
               />
             </div>
@@ -1461,7 +1769,7 @@ const openExtension = useCallback(async () => {
                   key={qualification.id}
                   variant={selectedQualification?.id === qualification.id ? "default" : "outline"}
                   onClick={() => qualifyCall(qualification)}
-                  /*disabled={isLoading || selectedQualification?.id === qualification.id}*/
+                  disabled={isLoading || selectedQualification?.id === qualification.id}
                   className="justify-start"
                 >
                   {qualification.name}
@@ -1478,6 +1786,23 @@ const openExtension = useCallback(async () => {
           </Button>
         )}
       </CardContent>
+
+      <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar Desconexão</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja desconectar? Você precisará inserir seu token novamente para reconectar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleLogout}>
+              Desconectar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }
