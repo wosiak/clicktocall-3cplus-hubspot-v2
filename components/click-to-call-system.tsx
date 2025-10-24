@@ -20,6 +20,7 @@ import {
   translateCallStatus,
   type CallData as HubSpotCallData
 } from "@/lib/hubspot-call-provider"
+import { useSocketBroadcast } from "@/hooks/use-socket-broadcast"
 
 // Types
 interface Campaign {
@@ -97,14 +98,115 @@ export default function ClickToCallSystem() {
   const agentConnectedTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const extensionWindowRef = useRef<Window | null>(null)
 
-  // NOVO: Refs para BroadcastChannels
-  const extensionChannelRef = useRef<BroadcastChannel | null>(null)
-  const heartbeatChannelRef = useRef<BroadcastChannel | null>(null)
-  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  // Socket.IO broadcast hook
+  const socketBroadcast = useSocketBroadcast({
+    token,
+    handlers: {
+      onExtensionOpened: (data) => {
+        console.log("✅ Extensão aberta detectada via Socket.IO")
+        extensionIsOpenRef.current = true
+        if (checkExtensionTimeoutRef.current) {
+          clearTimeout(checkExtensionTimeoutRef.current)
+          checkExtensionTimeoutRef.current = null
+        }
+        updateStatus("Extensão já está aberta. Aguardando conexão...", "info")
+      },
+      onExtensionConnected: (data) => {
+        console.log("✅ Extensão conectada via SIP via Socket.IO")
+        extensionIsOpenRef.current = true
+        updateStatus("Extensão conectada com sucesso", "success")
+      },
+      onExtensionClosed: (data) => {
+        console.log("❌ Extensão foi fechada via Socket.IO")
+        extensionIsOpenRef.current = false
+        extensionWindowRef.current = null
+      },
+      onAgentConnected: (data) => {
+        console.log("🔗 Agent conectado em outra aba via Socket.IO:", data.status)
+        
+        // Garantir que o token esteja carregado do localStorage
+        const storedToken = localStorage.getItem("3c_api_token")
+        if (storedToken && !tokenRef.current) {
+          console.log("🔐 Carregando token do localStorage para esta aba")
+          tokenRef.current = storedToken
+          setToken(storedToken)
+        }
+
+        // Conectar socket nesta aba também se não estiver conectado
+        if (!socketRef.current?.connected) {
+          connectSocket()
+        }
+
+        // Atualizar estado baseado no status recebido
+        const receivedStatus = data.status
+        if (receivedStatus === 0) {
+          setConnectionStatus("connected")
+          setAgentStatus("idle")
+          notifyUserAvailable()
+        } else if (receivedStatus === 4) {
+          setConnectionStatus("connected")
+          setAgentStatus("logged_in")
+          notifyUserLoggedIn()
+          updateStatus("Operador já está logado. Pronto para discar.", "success")
+        } else {
+          setConnectionStatus("connected")
+          updateStatus(`Operador conectado (status: ${receivedStatus}). Aguardando...`, "info")
+        }
+      },
+      onCampaignsLoaded: (data) => {
+        console.log("📋 Campanhas recebidas via Socket.IO:", data.campaigns)
+        const receivedCampaigns = data.campaigns || []
+        setCampaigns(receivedCampaigns)
+        updateStatus(`${receivedCampaigns.length} campanhas encontradas. Escolha uma para fazer login.`, "success")
+      },
+      onAgentLoggedOut: (data) => {
+        console.log("🚪 Agente deslogado em outra aba via Socket.IO")
+        setAgentStatus("idle")
+        updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+      },
+      onAgentLoggedOutDuringCall: (data) => {
+        console.log("🚪 Agente deslogado durante chamada em outra aba via Socket.IO")
+        
+        // Marcar flag em TODAS as abas
+        setWasLoggedOutDuringCall(true)
+        wasLoggedOutDuringCallRef.current = true
+
+        // Se esta aba está logada mas não está em chamada, deslogar imediatamente
+        if (agentStatusRef.current === "logged_in") {
+          setAgentStatus("idle")
+          updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
+        }
+      },
+      onMicrophoneMuted: (data) => {
+        console.log("🔇 Microfone mutado via Socket.IO")
+        setIsMicrophoneMuted(true)
+      },
+      onMicrophoneUnmuted: (data) => {
+        console.log("🎤 Microfone ativo via Socket.IO")
+        setIsMicrophoneMuted(false)
+      },
+      onExtensionStatusResponse: (data) => {
+        if (data.isOpen) {
+          console.log("✅ Extensão já está aberta (resposta via Socket.IO)")
+          extensionIsOpenRef.current = true
+          if (checkExtensionTimeoutRef.current) {
+            clearTimeout(checkExtensionTimeoutRef.current)
+            checkExtensionTimeoutRef.current = null
+          }
+          if (data.isConnected) {
+            updateStatus("Extensão já conectada", "success")
+          }
+        }
+      }
+    }
+  })
+
+  // Refs para controle de extensão
   const extensionIsOpenRef = useRef<boolean>(false)
   const checkExtensionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastExtensionHeartbeatRef = useRef<number>(Date.now())
   const extensionHeartbeatCheckRef = useRef<NodeJS.Timeout | null>(null)
+  const heartbeatIntervalRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     tokenRef.current = token
@@ -151,139 +253,11 @@ export default function ClickToCallSystem() {
     setStatus({ message, type })
   }, [])
 
-  // NOVO: Inicializar BroadcastChannels para comunicação com /extension
+  // Inicializar Socket.IO broadcast
   useEffect(() => {
-    const extensionChannel = new BroadcastChannel("extension-status")
-    const heartbeatChannel = new BroadcastChannel("extension-heartbeat")
-
-    extensionChannelRef.current = extensionChannel
-    heartbeatChannelRef.current = heartbeatChannel
-
-    // Escutar eventos da extensão
-    extensionChannel.onmessage = (event) => {
-      console.log("📡 Mensagem recebida da extensão:", event.data)
-
-      switch (event.data.type) {
-        case "EXTENSION_OPENED":
-          console.log("✅ Extensão aberta detectada")
-          extensionIsOpenRef.current = true
-          if (checkExtensionTimeoutRef.current) {
-            clearTimeout(checkExtensionTimeoutRef.current)
-            checkExtensionTimeoutRef.current = null
-          }
-          updateStatus("Extensão já está aberta. Aguardando conexão...", "info")
-          break
-
-        case "EXTENSION_CONNECTED":
-          console.log("✅ Extensão conectada via SIP")
-          extensionIsOpenRef.current = true
-          updateStatus("Extensão conectada com sucesso", "success")
-          break
-
-        case "EXTENSION_CLOSED":
-          console.log("❌ Extensão foi fechada")
-          extensionIsOpenRef.current = false
-          extensionWindowRef.current = null
-          break
-
-        case "EXTENSION_REOPENED":
-          console.log("🔄 Extensão foi reaberta em outra aba")
-          extensionIsOpenRef.current = true
-          lastExtensionHeartbeatRef.current = Date.now()
-          setShowReopenExtensionButton(false)
-          updateStatus("Extensão reaberta", "success")
-          break
-
-        case "MICROPHONE_MUTED":
-          console.log("🔇 Microfone mutado")
-          setIsMicrophoneMuted(true)
-          break
-
-        case "MICROPHONE_UNMUTED":
-          console.log("🎤 Microfone ativo")
-          setIsMicrophoneMuted(false)
-          break
-
-        case "EXTENSION_STATUS_RESPONSE":
-          if (event.data.isOpen) {
-            console.log("✅ Extensão já está aberta (resposta)")
-            extensionIsOpenRef.current = true
-            if (checkExtensionTimeoutRef.current) {
-              clearTimeout(checkExtensionTimeoutRef.current)
-              checkExtensionTimeoutRef.current = null
-            }
-            if (event.data.isConnected) {
-              updateStatus("Extensão já conectada", "success")
-            }
-          }
-          break
-
-        case "AGENT_CONNECTED":
-          console.log("🔗 Agent conectado em outra aba:", event.data.status)
-
-          // Garantir que o token esteja carregado do localStorage
-          const storedToken = localStorage.getItem("3c_api_token")
-          if (storedToken && !tokenRef.current) {
-            console.log("🔐 Carregando token do localStorage para esta aba")
-            tokenRef.current = storedToken
-            setToken(storedToken)
-          }
-
-          // Conectar socket nesta aba também se não estiver conectado
-          if (!socketRef.current?.connected) {
-            connectSocket()
-          }
-
-          // Atualizar estado baseado no status recebido
-          const receivedStatus = event.data.status
-          if (receivedStatus === 0) {
-            setConnectionStatus("connected")
-            setAgentStatus("idle")
-            notifyUserAvailable()
-            // Não chamar fetchCampaigns aqui, aguardar o broadcast CAMPAIGNS_LOADED
-          } else if (receivedStatus === 4) {
-            setConnectionStatus("connected")
-            setAgentStatus("logged_in")
-            notifyUserLoggedIn()
-            updateStatus("Operador já está logado. Pronto para discar.", "success")
-          } else {
-            setConnectionStatus("connected")
-            updateStatus(`Operador conectado (status: ${receivedStatus}). Aguardando...`, "info")
-          }
-          break
-
-        case "CAMPAIGNS_LOADED":
-          console.log("📋 Campanhas recebidas via broadcast:", event.data.campaigns)
-          const receivedCampaigns = event.data.campaigns || []
-          setCampaigns(receivedCampaigns)
-          updateStatus(`${receivedCampaigns.length} campanhas encontradas. Escolha uma para fazer login.`, "success")
-          break
-
-        case "AGENT_LOGGED_OUT":
-          console.log("🚪 Agente deslogado em outra aba")
-          setAgentStatus("idle")
-          updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
-          break
-
-        case "AGENT_LOGGED_OUT_DURING_CALL":
-          console.log("🚪 Agente deslogado durante chamada em outra aba")
-
-          // Marcar flag em TODAS as abas
-          setWasLoggedOutDuringCall(true)
-          wasLoggedOutDuringCallRef.current = true
-
-          // Se esta aba está logada mas não está em chamada, deslogar imediatamente
-          if (agentStatusRef.current === "logged_in") {
-            setAgentStatus("idle")
-            updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
-          }
-          break
-      }
-    }
-
     // Perguntar se extensão já está aberta (útil após F5)
-    console.log("🔍 Verificando se extensão já está aberta...")
-    extensionChannel.postMessage({ type: "CHECK_EXTENSION_STATUS" })
+    console.log("🔍 Verificando se extensão já está aberta via Socket.IO...")
+    socketBroadcast.checkExtensionStatus()
 
     // Aguardar resposta por 500ms - se não receber, assumir que não está aberta
     checkExtensionTimeoutRef.current = setTimeout(() => {
@@ -292,19 +266,9 @@ export default function ClickToCallSystem() {
       }
     }, 500)
 
-    // Escutar heartbeat do popup (detectar quando fecha)
-    heartbeatChannel.onmessage = (event) => {
-      if (event.data.type === "EXTENSION_ALIVE") {
-        lastExtensionHeartbeatRef.current = Date.now()
-      }
-    }
-
     // Enviar heartbeat a cada 2 segundos
     heartbeatIntervalRef.current = setInterval(() => {
-      heartbeatChannel.postMessage({
-        type: "CLICKTOCALL_ALIVE",
-        timestamp: Date.now(),
-      })
+      socketBroadcast.sendHeartbeat()
     }, 800)
 
     // Verificar heartbeat do popup a cada 3 segundos
@@ -331,10 +295,8 @@ export default function ClickToCallSystem() {
       if (extensionHeartbeatCheckRef.current) {
         clearInterval(extensionHeartbeatCheckRef.current)
       }
-      extensionChannel.close()
-      heartbeatChannel.close()
     }
-  }, [updateStatus])
+  }, [updateStatus, socketBroadcast])
 
   const resetCallState = useCallback(() => {
     console.log("🧹 Resetting call state completely")
@@ -624,12 +586,8 @@ export default function ClickToCallSystem() {
         setCampaigns(campaignList)
         updateStatus(`${campaignList.length} campanhas encontradas. Escolha uma para fazer login.`, "success")
 
-        // Broadcast campanhas para outras abas
-        extensionChannelRef.current?.postMessage({
-          type: "CAMPAIGNS_LOADED",
-          campaigns: campaignList,
-          timestamp: Date.now(),
-        })
+        // Broadcast campanhas para outras abas via Socket.IO
+        socketBroadcast.broadcastCampaignsLoaded(campaignList)
       }
     } catch (error) {
       console.error("❌ Error fetching campaigns:", error)

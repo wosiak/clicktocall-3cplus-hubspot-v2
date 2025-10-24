@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import JsSIP from "jssip";
+import { useSocketBroadcast } from "@/hooks/use-socket-broadcast";
 
 interface UserData {
   telephony_id: string;
@@ -35,61 +36,45 @@ function ExtensionContent() {
   const audioRef = useRef<HTMLAudioElement>(null);
   const wsAttemptsRef = useRef(0);
   const registerAttemptsRef = useRef(0);
-  const extensionChannelRef = useRef<BroadcastChannel | null>(null);
-  const heartbeatChannelRef = useRef<BroadcastChannel | null>(null);
   const lastHeartbeatRef = useRef(Date.now());
   const heartbeatCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize BroadcastChannels
-  useEffect(() => {
-    const extensionChannel = new BroadcastChannel("extension-status");
-    const heartbeatChannel = new BroadcastChannel("extension-heartbeat");
-
-    extensionChannelRef.current = extensionChannel;
-    heartbeatChannelRef.current = heartbeatChannel;
-
-    // Notify that extension opened
-    extensionChannel.postMessage({
-      type: "EXTENSION_OPENED",
-      timestamp: Date.now(),
-    });
-
-    // Listen for heartbeats from ClickToCall tabs
-    heartbeatChannel.onmessage = (event) => {
-      if (event.data.type === "CLICKTOCALL_ALIVE") {
+  // Socket.IO broadcast hook
+  const socketBroadcast = useSocketBroadcast({
+    token: apiToken || "",
+    handlers: {
+      onHeartbeat: (data) => {
         lastHeartbeatRef.current = Date.now();
-      }
-    };
-
-    // Respond to status checks
-    extensionChannel.onmessage = (event) => {
-      if (event.data.type === "CHECK_EXTENSION_STATUS") {
-        extensionChannel.postMessage({
-          type: "EXTENSION_STATUS_RESPONSE",
+      },
+      onCheckExtensionStatus: (data) => {
+        socketBroadcast.respondExtensionStatus({
           isOpen: true,
           isConnected: registered,
         });
-      }
-
-      // Check if token matches when connecting
-      if (event.data.type === "TOKEN_VALIDATION") {
+      },
+      onTokenValidation: (data) => {
         const currentToken = localStorage.getItem("3c_api_token");
-        const receivedToken = event.data.token;
+        const receivedToken = data.validationToken;
 
         if (currentToken !== receivedToken) {
           console.log("⚠️ Token diferente detectado. Fechando popup...");
-          extensionChannel.postMessage({ type: "EXTENSION_CLOSED" });
+          socketBroadcast.broadcastExtensionClosed({});
           window.close();
         }
       }
-    };
+    }
+  });
+
+  // Initialize Socket.IO broadcast
+  useEffect(() => {
+    // Notify that extension opened
+    socketBroadcast.broadcastExtensionOpened({
+      timestamp: Date.now(),
+    });
 
     // Send heartbeat back to tabs every 2 seconds
     const extensionHeartbeatInterval = setInterval(() => {
-      heartbeatChannel.postMessage({
-        type: "EXTENSION_ALIVE",
-        timestamp: Date.now(),
-      });
+      socketBroadcast.sendHeartbeat();
     }, 800);
 
     // Check heartbeats from tabs every 2 seconds
@@ -100,28 +85,26 @@ function ExtensionContent() {
       const currentToken = localStorage.getItem("3c_api_token");
       if (!currentToken) {
         console.log("⚠️ Token removido do localStorage. Fechando popup...");
-        extensionChannel.postMessage({ type: "EXTENSION_CLOSED" });
+        socketBroadcast.broadcastExtensionClosed({});
         window.close();
         return;
       }
 
       if (timeSinceLastHeartbeat > 3000) {
         console.log("⚠️ Nenhuma aba ClickToCall ativa. Fechando popup...");
-        extensionChannel.postMessage({ type: "EXTENSION_CLOSED" });
+        socketBroadcast.broadcastExtensionClosed({});
         window.close();
       }
     }, 800);
 
     return () => {
-      extensionChannel.postMessage({ type: "EXTENSION_CLOSED" });
+      socketBroadcast.broadcastExtensionClosed({});
       clearInterval(extensionHeartbeatInterval);
-      extensionChannel.close();
-      heartbeatChannel.close();
       if (heartbeatCheckIntervalRef.current) {
         clearInterval(heartbeatCheckIntervalRef.current);
       }
     };
-  }, [registered]);
+  }, [registered, socketBroadcast]);
 
   // Fetch user data and initialize
   useEffect(() => {
@@ -252,9 +235,8 @@ function ExtensionContent() {
       wsAttemptsRef.current = 0;
       registerAttemptsRef.current = 0;
 
-      // Notify connection success
-      extensionChannelRef.current?.postMessage({
-        type: "EXTENSION_CONNECTED",
+      // Notify connection success via Socket.IO
+      socketBroadcast.broadcastExtensionConnected({
         token: apiToken,
       });
     });
@@ -341,23 +323,17 @@ function ExtensionContent() {
       if (muted) {
         sessionRef.current.unmute();
         setMuted(false);
-        // Broadcast unmute to ClickToCall tabs
-        if (extensionChannelRef.current) {
-          extensionChannelRef.current.postMessage({
-            type: "MICROPHONE_UNMUTED",
-            timestamp: Date.now(),
-          });
-        }
+        // Broadcast unmute to ClickToCall tabs via Socket.IO
+        socketBroadcast.broadcastMicrophoneUnmuted({
+          timestamp: Date.now(),
+        });
       } else {
         sessionRef.current.mute();
         setMuted(true);
-        // Broadcast mute to ClickToCall tabs
-        if (extensionChannelRef.current) {
-          extensionChannelRef.current.postMessage({
-            type: "MICROPHONE_MUTED",
-            timestamp: Date.now(),
-          });
-        }
+        // Broadcast mute to ClickToCall tabs via Socket.IO
+        socketBroadcast.broadcastMicrophoneMuted({
+          timestamp: Date.now(),
+        });
       }
     }
   };

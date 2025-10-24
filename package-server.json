@@ -1,0 +1,21 @@
+{
+  "name": "clicktocall-3cplus-hubspot-server",
+  "version": "1.0.0",
+  "description": "Click-to-Call 3C Plus HubSpot Integration with Socket.IO Server",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "NODE_ENV=production node server.js",
+    "build": "next build"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.5",
+    "next": "15.2.4",
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
