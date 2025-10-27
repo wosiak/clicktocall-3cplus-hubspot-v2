@@ -72,10 +72,10 @@ function ExtensionContent() {
       timestamp: Date.now(),
     });
 
-    // Send heartbeat back to tabs every 2 seconds
+    // Send heartbeat back to tabs every 5 seconds
     const extensionHeartbeatInterval = setInterval(() => {
       socketBroadcast.sendHeartbeat();
-    }, 800);
+    }, 5000);
 
     // Check heartbeats from tabs every 2 seconds
     heartbeatCheckIntervalRef.current = setInterval(() => {
@@ -90,7 +90,7 @@ function ExtensionContent() {
         return;
       }
 
-      if (timeSinceLastHeartbeat > 3000) {
+      if (timeSinceLastHeartbeat > 10000) {
         console.log("⚠️ Nenhuma aba ClickToCall ativa. Fechando popup...");
         socketBroadcast.broadcastExtensionClosed({});
         window.close();

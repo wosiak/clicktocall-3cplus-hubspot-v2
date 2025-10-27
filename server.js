@@ -3,6 +3,7 @@ const { createServer } = require('http');
 const { Server } = require('socket.io');
 const next = require('next');
 const path = require('path');
+const fs = require('fs');
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
@@ -19,10 +20,13 @@ app.prepare().then(() => {
   const server = createServer();
   const io = new Server(server, {
     cors: {
-      origin: "*",
-      methods: ["GET", "POST"]
+      origin: true, // Aceitar qualquer origem em desenvolvimento
+      methods: ["GET", "POST"],
+      credentials: true
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    allowEIO3: true,
+    path: '/socket.io/'
   });
 
   // Socket.IO connection handling
@@ -57,7 +61,7 @@ app.prepare().then(() => {
     socket.on('extension-opened', (data) => {
       const { token } = data;
       const roomName = `token-${token}`;
-      console.log(`📱 Extension opened for token: ${token}`);
+      console.log(`📱 Extension opened for token: ${token} in room: ${roomName}`);
       socket.to(roomName).emit('extension-opened', data);
     });
 
@@ -124,6 +128,7 @@ app.prepare().then(() => {
     socket.on('heartbeat', (data) => {
       const { token } = data;
       const roomName = `token-${token}`;
+      console.log(`💓 Heartbeat received from ${socket.id} in room ${roomName}`);
       socket.to(roomName).emit('heartbeat', { socketId: socket.id, timestamp: Date.now() });
     });
 

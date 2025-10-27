@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste Socket.IO - Click-to-Call</title>
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .info { background-color: #d1ecf1; color: #0c5460; }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover { background-color: #0056b3; }
+        button:disabled { background-color: #6c757d; cursor: not-allowed; }
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 5px;
+            width: 200px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Teste Socket.IO - Click-to-Call</h1>
+        
+        <div class="status" id="connectionStatus">Desconectado</div>
+        
+        <div>
+            <input type="text" id="tokenInput" placeholder="Digite o token de teste" value="test-token-123">
+            <button onclick="connectSocket()">Conectar</button>
+            <button onclick="disconnectSocket()">Desconectar</button>
+        </div>
+        
+        <div>
+            <button onclick="sendHeartbeat()">Enviar Heartbeat</button>
+            <button onclick="sendExtensionOpened()">Simular Extension Opened</button>
+            <button onclick="sendExtensionConnected()">Simular Extension Connected</button>
+            <button onclick="clearLog()">Limpar Log</button>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script>
+        let socket = null;
+        let token = 'test-token-123';
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function updateStatus(status, className) {
+            const statusDiv = document.getElementById('connectionStatus');
+            statusDiv.textContent = status;
+            statusDiv.className = `status ${className}`;
+        }
+        
+        function connectSocket() {
+            if (socket && socket.connected) {
+                log('❌ Já conectado!');
+                return;
+            }
+            
+            token = document.getElementById('tokenInput').value || 'test-token-123';
+            
+            log(`🔌 Conectando ao Socket.IO com token: ${token}`);
+            
+            socket = io('https://localhost', {
+                transports: ['websocket', 'polling'],
+                secure: true,
+                rejectUnauthorized: false,
+                query: { token: token }
+            });
+            
+            socket.on('connect', () => {
+                log('✅ Conectado ao Socket.IO!');
+                updateStatus('Conectado', 'connected');
+                
+                // Join room
+                socket.emit('join-room', { token: token });
+                log(`📱 Entrou na sala: token-${token}`);
+            });
+            
+            socket.on('disconnect', () => {
+                log('❌ Desconectado do Socket.IO');
+                updateStatus('Desconectado', 'disconnected');
+            });
+            
+            socket.on('connect_error', (error) => {
+                log(`❌ Erro de conexão: ${error.message}`);
+                updateStatus('Erro de Conexão', 'disconnected');
+            });
+            
+            // Event listeners
+            socket.on('heartbeat', (data) => {
+                log(`💓 Heartbeat recebido: ${JSON.stringify(data)}`);
+            });
+            
+            socket.on('extension-opened', (data) => {
+                log(`📱 Extension opened: ${JSON.stringify(data)}`);
+            });
+            
+            socket.on('extension-connected', (data) => {
+                log(`✅ Extension connected: ${JSON.stringify(data)}`);
+            });
+            
+            socket.on('user-connected', (data) => {
+                log(`👤 User connected: ${JSON.stringify(data)}`);
+            });
+        }
+        
+        function disconnectSocket() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                log('🔌 Desconectado manualmente');
+                updateStatus('Desconectado', 'disconnected');
+            }
+        }
+        
+        function sendHeartbeat() {
+            if (!socket || !socket.connected) {
+                log('❌ Não conectado!');
+                return;
+            }
+            
+            socket.emit('heartbeat', { token: token, timestamp: Date.now() });
+            log(`💓 Heartbeat enviado para token: ${token}`);
+        }
+        
+        function sendExtensionOpened() {
+            if (!socket || !socket.connected) {
+                log('❌ Não conectado!');
+                return;
+            }
+            
+            socket.emit('extension-opened', { 
+                token: token, 
+                timestamp: Date.now(),
+                userAgent: navigator.userAgent
+            });
+            log(`📱 Extension opened enviado para token: ${token}`);
+        }
+        
+        function sendExtensionConnected() {
+            if (!socket || !socket.connected) {
+                log('❌ Não conectado!');
+                return;
+            }
+            
+            socket.emit('extension-connected', { 
+                token: token, 
+                timestamp: Date.now(),
+                status: 'registered'
+            });
+            log(`✅ Extension connected enviado para token: ${token}`);
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // Auto-connect on page load
+        window.onload = function() {
+            log('🚀 Página carregada. Clique em "Conectar" para testar.');
+        };
+    </script>
+</body>
+</html>

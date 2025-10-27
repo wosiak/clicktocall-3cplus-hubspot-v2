@@ -57,9 +57,9 @@ HOSTNAME=0.0.0.0
 
 ### Portas
 
-- **3000**: Aplicação principal (Next.js + Socket.IO)
-- **80**: Nginx (se habilitado)
-- **443**: HTTPS (se configurado)
+- **3000**: Aplicação principal (Next.js + Socket.IO) - HTTPS
+- **80**: Nginx HTTP (redireciona para HTTPS)
+- **443**: Nginx HTTPS (recomendado para WebRTC)
 
 ## 📊 Monitoramento
 
@@ -129,9 +129,12 @@ docker system prune -f
 
 Após o deploy, a aplicação estará disponível em:
 
-- **Aplicação principal**: http://localhost:3000
-- **Com Nginx**: http://localhost:80
-- **Extensão**: http://localhost:3000/extension
+- **Aplicação principal (HTTPS)**: https://localhost
+- **Aplicação direta**: https://localhost:3000
+- **Extensão (HTTPS)**: https://localhost/extension
+- **Health Check**: https://localhost/api/health
+
+⚠️ **IMPORTANTE**: A aplicação usa WebRTC e **DEVE** ser acessada via HTTPS para funcionar corretamente com o microfone.
 
 ## 🔧 Troubleshooting
 
@@ -168,7 +171,21 @@ Após o deploy, a aplicação estará disponível em:
 - **Next.js**: Erros de build e runtime
 - **Nginx**: Requests e erros de proxy
 
-## 🔒 Segurança
+## 🔒 Segurança e HTTPS
+
+### HTTPS Obrigatório para WebRTC
+
+Esta aplicação **DEVE** ser servida via HTTPS porque:
+- ✅ **WebRTC**: Requer HTTPS para acesso ao microfone
+- ✅ **JsSIP**: Necessita HTTPS para conexões SIP
+- ✅ **getUserMedia**: API do navegador que só funciona em HTTPS
+- ✅ **Socket.IO**: Configurado para HTTPS com certificados seguros
+
+### Certificados SSL
+
+- **Desenvolvimento**: Certificados auto-assinados em `./ssl/`
+- **Produção**: Use certificados válidos (Let's Encrypt, etc.)
+- **Teste**: Execute `./test-https.sh` para verificar configuração
 
 ### Headers de Segurança
 
@@ -176,7 +193,8 @@ O Nginx está configurado com:
 - X-Frame-Options
 - X-XSS-Protection
 - X-Content-Type-Options
-- Content-Security-Policy
+- Strict-Transport-Security (HSTS)
+- Content-Security-Policy (com suporte a WebRTC)
 
 ### Rate Limiting
 

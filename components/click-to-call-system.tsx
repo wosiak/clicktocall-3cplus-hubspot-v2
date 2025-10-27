@@ -103,13 +103,15 @@ export default function ClickToCallSystem() {
     token,
     handlers: {
       onExtensionOpened: (data) => {
-        console.log("✅ Extensão aberta detectada via Socket.IO")
+        console.log("✅ Extensão aberta detectada via Socket.IO", data)
         extensionIsOpenRef.current = true
+        lastExtensionHeartbeatRef.current = Date.now()
         if (checkExtensionTimeoutRef.current) {
           clearTimeout(checkExtensionTimeoutRef.current)
           checkExtensionTimeoutRef.current = null
         }
-        updateStatus("Extensão já está aberta. Aguardando conexão...", "info")
+        setShowReopenExtensionButton(false)
+        updateStatus("Extensão detectada! Aguardando conexão...", "success")
       },
       onExtensionConnected: (data) => {
         console.log("✅ Extensão conectada via SIP via Socket.IO")
@@ -120,6 +122,16 @@ export default function ClickToCallSystem() {
         console.log("❌ Extensão foi fechada via Socket.IO")
         extensionIsOpenRef.current = false
         extensionWindowRef.current = null
+      },
+      onHeartbeat: (data) => {
+        console.log("💓 Heartbeat recebido via Socket.IO", data)
+        lastExtensionHeartbeatRef.current = Date.now()
+        // Se recebeu heartbeat, extensão está viva
+        if (!extensionIsOpenRef.current) {
+          extensionIsOpenRef.current = true
+          setShowReopenExtensionButton(false)
+          updateStatus("Extensão detectada via heartbeat!", "info")
+        }
       },
       onAgentConnected: (data) => {
         console.log("🔗 Agent conectado em outra aba via Socket.IO:", data.status)
@@ -259,24 +271,24 @@ export default function ClickToCallSystem() {
     console.log("🔍 Verificando se extensão já está aberta via Socket.IO...")
     socketBroadcast.checkExtensionStatus()
 
-    // Aguardar resposta por 500ms - se não receber, assumir que não está aberta
+    // Aguardar resposta por 3 segundos - se não receber, assumir que não está aberta
     checkExtensionTimeoutRef.current = setTimeout(() => {
       if (!extensionIsOpenRef.current) {
         console.log("⏰ Timeout na verificação - extensão não está aberta")
       }
-    }, 500)
+    }, 3000)
 
-    // Enviar heartbeat a cada 2 segundos
+    // Enviar heartbeat a cada 5 segundos
     heartbeatIntervalRef.current = setInterval(() => {
       socketBroadcast.sendHeartbeat()
-    }, 800)
+    }, 5000)
 
     // Verificar heartbeat do popup a cada 3 segundos
     extensionHeartbeatCheckRef.current = setInterval(() => {
       const timeSinceLastHeartbeat = Date.now() - lastExtensionHeartbeatRef.current
 
-      // Se não receber heartbeat por 6 segundos, popup fechou
-      if (timeSinceLastHeartbeat > 3000 && extensionIsOpenRef.current) {
+      // Se não receber heartbeat por 10 segundos, popup fechou
+      if (timeSinceLastHeartbeat > 10000 && extensionIsOpenRef.current) {
         console.log("💔 Popup parou de enviar heartbeat - detectado como fechado")
         extensionIsOpenRef.current = false
         extensionWindowRef.current = null
@@ -929,20 +941,13 @@ export default function ClickToCallSystem() {
               console.log("📋 Campanhas já carregadas, reutilizando...")
               updateStatus("Operador conectado. Escolha uma campanha para fazer login.", "success")
 
-              // Fazer broadcast das campanhas já carregadas para outras abas
-              extensionChannelRef.current?.postMessage({
-                type: "CAMPAIGNS_LOADED",
-                campaigns: campaignsRef.current,
-                timestamp: Date.now(),
-              })
+              // Fazer broadcast das campanhas já carregadas para outras abas via Socket.IO
+              socketBroadcast.broadcastCampaignsLoaded(campaignsRef.current)
             }
 
             // Broadcast para outras abas atualizarem
-            extensionChannelRef.current?.postMessage({
-              type: "AGENT_CONNECTED",
-              status: agentStatus,
-              timestamp: Date.now(),
-            })
+            // Broadcast para outras abas atualizarem via Socket.IO
+            socketBroadcast.broadcastAgentConnected({ status: agentStatus, timestamp: Date.now() })
           } else if (agentStatus === 4) {
             // Status 4: Operador já está logado (tela de discagem)
             setConnectionStatus("connected")
@@ -951,22 +956,16 @@ export default function ClickToCallSystem() {
             updateStatus("Operador já está logado. Pronto para discar.", "success")
 
             // Broadcast para outras abas atualizarem
-            extensionChannelRef.current?.postMessage({
-              type: "AGENT_CONNECTED",
-              status: agentStatus,
-              timestamp: Date.now(),
-            })
+            // Broadcast para outras abas atualizarem via Socket.IO
+            socketBroadcast.broadcastAgentConnected({ status: agentStatus, timestamp: Date.now() })
           } else {
             // Outros status - tratar como conectado mas aguardando
             setConnectionStatus("connected")
             updateStatus(`Operador conectado (status: ${agentStatus}). Aguardando...`, "info")
 
             // Broadcast para outras abas atualizarem
-            extensionChannelRef.current?.postMessage({
-              type: "AGENT_CONNECTED",
-              status: agentStatus,
-              timestamp: Date.now(),
-            })
+            // Broadcast para outras abas atualizarem via Socket.IO
+            socketBroadcast.broadcastAgentConnected({ status: agentStatus, timestamp: Date.now() })
           }
           break
 
@@ -982,11 +981,8 @@ export default function ClickToCallSystem() {
             setWasLoggedOutDuringCall(true)
             wasLoggedOutDuringCallRef.current = true
 
-            // Broadcast para outras abas atualizarem
-            extensionChannelRef.current?.postMessage({
-              type: "AGENT_LOGGED_OUT_DURING_CALL",
-              timestamp: Date.now(),
-            })
+            // Broadcast para outras abas atualizarem via Socket.IO
+            socketBroadcast.broadcastAgentLoggedOutDuringCall({ timestamp: Date.now() })
             // Não mudar o agentStatus aqui, deixar o fluxo da chamada continuar
           } else {
             // Deslogar normalmente se não estiver em chamada
@@ -994,11 +990,8 @@ export default function ClickToCallSystem() {
             updateStatus("Operador foi desconectado. Selecione uma campanha abaixo para fazer login.", "info")
             if (!campaignsRef.current.length) fetchCampaigns()
 
-            // Broadcast para outras abas atualizarem
-            extensionChannelRef.current?.postMessage({
-              type: "AGENT_LOGGED_OUT",
-              timestamp: Date.now(),
-            })
+            // Broadcast para outras abas atualizarem via Socket.IO
+            socketBroadcast.broadcastAgentLoggedOut({ timestamp: Date.now() })
           }
           break
 
@@ -1274,7 +1267,7 @@ export default function ClickToCallSystem() {
   }
 }, [handleSocketEvent, updateStatus, returnToDisconnectedState])
 
-// NOVO: Função openExtension com controle via BroadcastChannel
+// NOVO: Função openExtension com controle via Socket.IO
 const openExtension = useCallback(async () => {
   const token = tokenRef.current?.trim()
   if (!token) {
@@ -1289,11 +1282,11 @@ const openExtension = useCallback(async () => {
     return
   }
 
-  // Verificar se extensão já está aberta via BroadcastChannel
+  // Verificar se extensão já está aberta via Socket.IO
   if (extensionIsOpenRef.current) {
-    // Fazer double check via BroadcastChannel
-    console.log("🔍 Verificando status da extensão via BroadcastChannel...")
-    extensionChannelRef.current?.postMessage({ type: "CHECK_EXTENSION_STATUS" })
+    // Fazer double check via Socket.IO
+    console.log("🔍 Verificando status da extensão via Socket.IO...")
+    socketBroadcast.checkExtensionStatus()
 
     // Aguardar resposta por 300ms
     await new Promise(resolve => setTimeout(resolve, 300))
@@ -1335,19 +1328,12 @@ const openExtension = useCallback(async () => {
     setShowReopenExtensionButton(false) // Hide reopen button
     updateStatus("Extensão aberta em nova guia. Aguardando conexão...", "info")
 
-    // Notificar outras abas que extensão foi reaberta
-    extensionChannelRef.current?.postMessage({
-      type: "EXTENSION_REOPENED",
-      timestamp: Date.now(),
-    })
+    // Notificar outras abas que extensão foi reaberta via Socket.IO
+    socketBroadcast.broadcastExtensionOpened({ timestamp: Date.now() })
 
-    // Enviar token para validação
+    // Enviar token para validação via Socket.IO
     setTimeout(() => {
-      extensionChannelRef.current?.postMessage({
-        type: "TOKEN_VALIDATION",
-        token: token,
-        timestamp: Date.now(),
-      })
+      socketBroadcast.broadcastTokenValidation({ token, timestamp: Date.now() })
     }, 500) // Delay para garantir que extension está pronta para receber
   } else {
     console.warn("🚫 Falha ao abrir a nova aba (popup bloqueado?)")
@@ -1374,17 +1360,13 @@ const openExtension = useCallback(async () => {
       // 1. Conectar socket primeiro
       connectSocket()
 
-      // 2. Abrir extensão (BroadcastChannel detectará se já está aberta)
+      // 2. Abrir extensão (Socket.IO detectará se já está aberta)
       console.log("🔧 Abrindo extensão...")
       await openExtension()
 
-      // 2.5. Enviar token para validação no extension
+      // 2.5. Enviar token para validação no extension via Socket.IO
       console.log("🔐 Enviando token para validação...")
-      extensionChannelRef.current?.postMessage({
-        type: "TOKEN_VALIDATION",
-        token: currentToken,
-        timestamp: Date.now(),
-      })
+      socketBroadcast.broadcastTokenValidation({ token: currentToken, timestamp: Date.now() })
 
       // 3. Aguardar evento 'agent-is-connected' por um tempo limite
       updateStatus("Aguardando resposta do operador...", "loading")

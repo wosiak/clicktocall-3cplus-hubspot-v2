@@ -28,22 +28,42 @@ interface UseSocketBroadcastProps {
 export function useSocketBroadcast({ 
   token, 
   handlers, 
-  serverUrl = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:3000' 
+  serverUrl = process.env.NODE_ENV === 'production' ? '' : 'https://localhost' 
 }: UseSocketBroadcastProps) {
   const socketRef = useRef<Socket | null>(null)
   const isConnectedRef = useRef<boolean>(false)
+  const handlersRef = useRef(handlers)
+
+  // Update handlers ref when handlers change
+  useEffect(() => {
+    handlersRef.current = handlers
+  }, [handlers])
 
   const connectSocket = useCallback(() => {
-    if (!token || socketRef.current?.connected) return
+    if (!token) return
+    
+    // Se já tem socket conectado, não criar outro
+    if (socketRef.current?.connected) {
+      console.log("🔌 Socket.IO já conectado, reutilizando...")
+      return
+    }
+    
+    // Se tem socket desconectado, limpar primeiro
+    if (socketRef.current) {
+      console.log("🧹 Limpando socket anterior...")
+      socketRef.current.disconnect()
+      socketRef.current = null
+    }
 
-    console.log("🔌 Connecting to Socket.IO server...")
+    console.log("🔌 Conectando ao Socket.IO server...")
     
     const socket = io(serverUrl, {
       transports: ['websocket', 'polling'],
       autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnection: false, // DESABILITAR auto-reconnection
+      timeout: 20000,
+      secure: true,
+      rejectUnauthorized: false,
     })
 
     socketRef.current = socket
@@ -66,76 +86,76 @@ export function useSocketBroadcast({
       console.log("📱 Joined room:", data)
     })
 
-    // Event handlers
+    // Event handlers - usando handlersRef.current para evitar closures
     socket.on('extension-opened', (data) => {
       console.log("📱 Extension opened:", data)
-      handlers.onExtensionOpened?.(data)
+      handlersRef.current.onExtensionOpened?.(data)
     })
 
     socket.on('extension-connected', (data) => {
       console.log("✅ Extension connected:", data)
-      handlers.onExtensionConnected?.(data)
+      handlersRef.current.onExtensionConnected?.(data)
     })
 
     socket.on('extension-closed', (data) => {
       console.log("❌ Extension closed:", data)
-      handlers.onExtensionClosed?.(data)
+      handlersRef.current.onExtensionClosed?.(data)
     })
 
     socket.on('agent-connected', (data) => {
       console.log("🔗 Agent connected:", data)
-      handlers.onAgentConnected?.(data)
+      handlersRef.current.onAgentConnected?.(data)
     })
 
     socket.on('agent-logged-out', (data) => {
       console.log("🚪 Agent logged out:", data)
-      handlers.onAgentLoggedOut?.(data)
+      handlersRef.current.onAgentLoggedOut?.(data)
     })
 
     socket.on('agent-logged-out-during-call', (data) => {
       console.log("🚪 Agent logged out during call:", data)
-      handlers.onAgentLoggedOutDuringCall?.(data)
+      handlersRef.current.onAgentLoggedOutDuringCall?.(data)
     })
 
     socket.on('campaigns-loaded', (data) => {
       console.log("📋 Campaigns loaded:", data)
-      handlers.onCampaignsLoaded?.(data)
+      handlersRef.current.onCampaignsLoaded?.(data)
     })
 
     socket.on('microphone-muted', (data) => {
       console.log("🔇 Microphone muted:", data)
-      handlers.onMicrophoneMuted?.(data)
+      handlersRef.current.onMicrophoneMuted?.(data)
     })
 
     socket.on('microphone-unmuted', (data) => {
       console.log("🎤 Microphone unmuted:", data)
-      handlers.onMicrophoneUnmuted?.(data)
+      handlersRef.current.onMicrophoneUnmuted?.(data)
     })
 
     socket.on('heartbeat', (data) => {
-      handlers.onHeartbeat?.(data)
+      handlersRef.current.onHeartbeat?.(data)
     })
 
     socket.on('token-validation', (data) => {
       console.log("🔐 Token validation:", data)
-      handlers.onTokenValidation?.(data)
+      handlersRef.current.onTokenValidation?.(data)
     })
 
     socket.on('check-extension-status', (data) => {
       console.log("🔍 Check extension status:", data)
-      handlers.onCheckExtensionStatus?.(data)
+      handlersRef.current.onCheckExtensionStatus?.(data)
     })
 
     socket.on('extension-status-response', (data) => {
       console.log("📊 Extension status response:", data)
-      handlers.onExtensionStatusResponse?.(data)
+      handlersRef.current.onExtensionStatusResponse?.(data)
     })
 
     socket.on('error', (error) => {
       console.error("🚨 Socket.IO error:", error)
     })
 
-  }, [token, serverUrl, handlers])
+  }, [token, serverUrl])
 
   const disconnectSocket = useCallback(() => {
     if (socketRef.current) {
@@ -229,21 +249,20 @@ export function useSocketBroadcast({
   useEffect(() => {
     if (token) {
       connectSocket()
-    } else {
-      disconnectSocket()
+    } else if (socketRef.current) {
+      socketRef.current.disconnect()
+      socketRef.current = null
+      isConnectedRef.current = false
     }
 
     return () => {
-      disconnectSocket()
+      if (socketRef.current) {
+        socketRef.current.disconnect()
+        socketRef.current = null
+        isConnectedRef.current = false
+      }
     }
-  }, [token, connectSocket, disconnectSocket])
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnectSocket()
-    }
-  }, [disconnectSocket])
+  }, [token])
 
   return {
     isConnected: isConnectedRef.current,
